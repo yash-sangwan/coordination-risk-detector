@@ -174,6 +174,74 @@ DOWNTIME_MINUTES = (90, 480)           # ASSUMPTION. Widened from (45,240): real
 DOWNTIME_DECLINE_MULT = (5.0, 10.0)    # spec 1.5
 
 # --------------------------------------------------------------------------
+# Guest checkout and non-shipping goods (legitimate)
+# --------------------------------------------------------------------------
+# These exist because spec 2.1 says card testing leaves account_id and
+# shipping_pincode "usually null". The legitimate stream previously emitted a
+# value for both on every single row, which would have made nullness a perfect
+# label. Guest checkout and digital goods are both real, so they are modelled
+# rather than left as a hole for the attack to fall through.
+GUEST_CHECKOUT_SHARE = 0.12            # ASSUMPTION. Sessions with no account.
+NON_SHIPPING_SHARE = 0.18              # ASSUMPTION. Digital goods, recharges,
+                                       # top-ups and subscriptions do not ship.
+
+# --------------------------------------------------------------------------
+# 2.1 Card testing bursts
+# --------------------------------------------------------------------------
+# Spec 2.1 gives bursts of 10-90 minutes at 20-200 attempts/min. At this
+# merchant's volume (~2,016 events/day, ~1.4/min average, ~3/min at peak) the
+# top of that range is incoherent: a single 90-minute burst at 200/min is 18,000
+# events, or 22.9% of the entire 30-day stream on its own. The cited anchor is a
+# merchant whose carding PEAKED at 8% of transactions, so we sit at the bottom of
+# both spec ranges. This narrowing is arithmetic, not preference, and it is the
+# merchant that is small rather than the spec that is wrong.
+BURST_MINUTES = (10, 45)               # bottom of spec's 10-90
+BURST_RATE_PER_MIN = (20, 60)          # bottom of spec's 20-200
+BURSTS_PER_CAMPAIGN = (4, 7)           # ASSUMPTION. Spec says bursts "recur over days
+                                       # or weeks" and gives no count, so this is the one
+                                       # lever here that is ours rather than the spec's.
+                                       # At 8-13 bursts prevalence reached 12.4%, far above
+                                       # the cited 8%-at-peak anchor, so the count came down
+                                       # rather than the spec's rate or duration bands.
+BURST_GAP_DAYS = (1.5, 5.0)            # ASSUMPTION, spacing between bursts
+
+# Campaign envelope, matching the cited slow rise / plateau / decline shape.
+CAMPAIGN_RISE_FRACTION = 0.35
+CAMPAIGN_PLATEAU_FRACTION = 0.40       # decline takes the remaining 0.25
+CAMPAIGN_ENVELOPE_FLOOR = 0.20         # a burst at the very start is still real
+
+BURST_IIN_COUNT = (1, 3)               # spec 2.1
+BURST_DEVICE_COUNT = (1, 5)            # spec 2.1
+
+# Card testing is testing whether stolen cards are live, so most attempts fail.
+# The point of the exercise is the small fraction that do not.
+ATTACK_DECLINE_BASE = 0.88             # ASSUMPTION
+ATTACK_DECLINE_BLOCKED = 0.99          # when an issuer or the merchant blocks
+
+# Concentrated CVV/expiry class, unlike the broad legitimate mix.
+ATTACK_DECLINE_REASONS = [
+    ("incorrect_cvv",   0.62, "BAD_REQUEST_ERROR", "customer", "payment_authentication"),
+    ("card_expired",    0.24, "BAD_REQUEST_ERROR", "customer", "payment_initiation"),
+    ("card_declined",   0.14, "BAD_REQUEST_ERROR", "customer", "payment_authorization"),
+]
+
+ATTACK_CHECKOUT_MS = (150, 2500)       # spec 2.1, heavy mode near 300ms
+ATTACK_CHECKOUT_MODE = 300
+
+# Amount mixture from spec 2.1, deliberately not a single band.
+ATTACK_AMOUNT_MICRO = 0.55             # 1-50 rupees
+ATTACK_AMOUNT_LOW = 0.30               # 50-500 rupees
+# remaining 0.15 is drawn from the LEGITIMATE amount distribution (blending)
+
+ATTACK_ATTEMPT_SEQ1_SHARE = 0.92       # "frequently 1", fresh session each time
+ATTACK_ACCOUNT_ID_NULL_SHARE = 0.90    # "usually null", guest checkout
+ATTACK_PINCODE_NULL_SHARE = 0.93       # "usually null", nothing ships
+
+# Endings, spec 2.1 proportions
+BURST_ENDINGS = [("exhausted", 0.50), ("blocked", 0.35), ("moves_on", 0.15)]
+BURST_DECAY_MINUTES = (10, 20)         # for the moves_on ending
+
+# --------------------------------------------------------------------------
 # 4. Benign collision structure
 # --------------------------------------------------------------------------
 # card.iin: 10 issuers x 2 IINs each, 80/20 intra-issuer split.

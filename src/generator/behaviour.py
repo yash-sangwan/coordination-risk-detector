@@ -140,6 +140,13 @@ def attempts_for_session(rng, actor, ts, downtimes):
     amount = draw_amount(rng)
     card = rng.choice(actor.cards) if method in ("card", "emi") else None
 
+    # Guest checkout and non-shipping goods are decided per session. Both exist in
+    # reality, and both must exist here: spec 2.1 leaves account_id and
+    # shipping_pincode usually null on attack traffic, so if legitimate traffic
+    # never had a null, nullness alone would be the label.
+    is_guest = rng.random() < C.GUEST_CHECKOUT_SHARE
+    ships = rng.random() >= C.NON_SHIPPING_SHARE
+
     attempts = []
     seq = 1
     cur_ts = ts
@@ -159,6 +166,8 @@ def attempts_for_session(rng, actor, ts, downtimes):
             "attempt_seq": seq,
             "checkout_ms": draw_checkout_ms(rng, actor.actor_class),
             "downtime_active": dt_active,
+            "is_guest": is_guest,
+            "ships": ships,
         })
         if not failed:
             break

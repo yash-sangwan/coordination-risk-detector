@@ -32,6 +32,15 @@ def build_row(minter, actor, attempt):
     card = attempt["card"]
     failed = attempt["failed"]
 
+    # A guest session has no account, and a session for goods that do not ship
+    # has no shipping pincode. Attack identities arrive with these already None.
+    account_id = None if attempt.get("is_guest") else actor.account_id
+    if account_id == "":
+        account_id = None
+    pincode = actor.pincode if attempt.get("ships", True) else None
+    if pincode == "":
+        pincode = None
+
     row = {
         "id": pay_id,
         "created_at": ts,
@@ -55,13 +64,16 @@ def build_row(minter, actor, attempt):
         # ARRAY when unset (docs/api-probe.md section 7). Never generator metadata.
         "notes": [],
         "merchant_context": {
-            "account_id": actor.account_id,
+            "account_id": account_id,
             "device_id": actor.device_id,
             "session_id": attempt["session_id"],
             "attempt_seq": attempt["attempt_seq"],
             "checkout_ms": attempt["checkout_ms"],
-            "shipping_pincode": actor.pincode,
-            "account_age_days": max(0, (ts - actor.signup_ts) // 86400),
+            "shipping_pincode": pincode,
+            # No account means no account age. Legitimate guest checkout and
+            # attack traffic both land here, which is the point.
+            "account_age_days": (None if account_id is None or actor.signup_ts is None
+                                 else max(0, (ts - actor.signup_ts) // 86400)),
         },
     }
 
@@ -90,21 +102,22 @@ def build_row(minter, actor, attempt):
     return row
 
 
-def sealed_record(row, actor, attempt, in_flash_sale):
+def sealed_record(row, actor, attempt, in_flash_sale, label=0):
     """Generative truth. Never joined before scoring.
 
-    label is 0 everywhere because this module only produces legitimate traffic.
-    The field exists now so the store's shape does not change when attacks land.
+    The event stream carries no marker of any kind. Everything that distinguishes
+    an attack row from a legitimate one lives here and nowhere else.
     """
     return {
         "id": row["id"],
-        "label": 0,
-        "attack_type": None,
+        "label": label,
+        "attack_type": "card_testing" if label else None,
+        "burst_id": attempt.get("burst_id"),
         "actor_id": actor.actor_id,
         "actor_class": actor.actor_class,
         "tier": actor.tier,
         "in_flash_sale": in_flash_sale,
-        "in_downtime": attempt["downtime_active"],
+        "in_downtime": attempt.get("downtime_active", False),
     }
 
 

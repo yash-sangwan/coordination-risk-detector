@@ -234,3 +234,147 @@ def main(path):
 
 if __name__ == "__main__":
     main(sys.argv[1] if len(sys.argv) > 1 else "data/sample")
+
+
+def attack_report(path, benign_baseline=None):
+    """Attack-side view. Read-only, no pass/fail, no acceptance tests."""
+    import datetime as _dt
+    events = load(f"{path}/events.jsonl")
+    sealed = load(f"{path}/sealed.jsonl")
+    manifest = json.load(open(f"{path}/manifest.json", encoding="utf-8"))
+    lab = {s["id"]: s for s in sealed}
+    atk = [e for e in events if lab[e["id"]]["label"] == 1]
+    ben = [e for e in events if lab[e["id"]]["label"] == 0]
+    n = len(events)
+
+    print("=" * 78)
+    print("CARD TESTING BURSTS")
+    print("=" * 78)
+    print(f"\nATTACK SHARE")
+    print(f"  total events            : {n}")
+    print(f"  attack events           : {len(atk)}  ({len(atk)/n*100:.2f}%)")
+    print(f"  legitimate events       : {len(ben)}  ({len(ben)/n*100:.2f}%)")
+
+    print(f"\nBURSTS ({len(manifest['bursts'])})")
+    print(f"  {'id':>4} {'start (IST)':>16} {'min':>4} {'rate/min':>9} {'events':>7} "
+          f"{'IINs':>5} {'devs':>5} {'envelope':>9}  ending")
+    per_burst = collections.Counter(lab[e["id"]]["burst_id"] for e in atk)
+    for b in manifest["bursts"]:
+        st = _dt.datetime.fromtimestamp(b["start"] + IST_OFFSET, _dt.timezone.utc)
+        print(f"  {b['burst_id']:>4} {st.strftime('%a %d %H:%M'):>16} {b['minutes']:>4} "
+              f"{b['rate_per_min']:>9.1f} {per_burst[b['burst_id']]:>7} "
+              f"{b['n_iins']:>5} {b['n_devices']:>5} {b['envelope']:>9.2f}  {b['ending']}")
+    endings = collections.Counter(b["ending"] for b in manifest["bursts"])
+    tot = sum(endings.values()) or 1
+    print("  endings:", ", ".join(f"{k} {v}/{tot} ({v/tot*100:.0f}%)"
+                                  for k, v in endings.most_common()),
+          "  [spec: exhausted 50%, blocked 35%, moves_on 15%]")
+
+    print("\nCAMPAIGN SHAPE (attack share of each day's events)")
+    day0 = manifest["window_start"]
+    daily = collections.defaultdict(lambda: [0, 0])
+    for e in events:
+        d = (e["created_at"] - day0) // 86400
+        daily[d][0] += 1
+        if lab[e["id"]]["label"] == 1:
+            daily[d][1] += 1
+    peak = max((a / max(t, 1) for t, a in daily.values()), default=0) or 1
+    for d in sorted(daily):
+        t, a = daily[d]
+        share = a / max(t, 1)
+        bar = "#" * int(46 * share / peak)
+        print(f"  day {d:>2}  {t:>5} ev  {share*100:>5.2f}%  {bar}")
+
+    print("\nSIX LINKING ATTRIBUTES: within-attack vs benign")
+    print("  (benign column is the legitimate-only run from the last commit)")
+    mc = lambda e: e["merchant_context"]
+
+    def acct_pairs(rows, val):
+        return [(mc(e)["account_id"], val(e)) for e in rows
+                if mc(e)["account_id"] is not None and val(e) is not None]
+
+    rowsets = [("card.iin", "pair",
+                lambda R: pair_collision([e["card"]["iin"] for e in R if e.get("card")])),
+               ("device_id", "pair",
+                lambda R: pair_collision([mc(e)["device_id"] for e in R])),
+               ("contact", "pair",
+                lambda R: pair_collision([e["contact"] for e in R])),
+               ("email domain", "pair",
+                lambda R: pair_collision([e["email"].split("@")[1] for e in R])),
+               ("vpa local part", "pair",
+                lambda R: pair_collision([e["vpa"].split("@")[0] for e in R if e.get("vpa")])),
+               ("shipping_pincode", "pair",
+                lambda R: pair_collision([mc(e)["shipping_pincode"] for e in R
+                                          if mc(e)["shipping_pincode"] is not None]))]
+    print(f"  {'attribute':<20} {'within-attack':>14} {'benign':>12} {'ratio':>9}")
+    print("  " + "-" * 58)
+    for name, _, fn in rowsets:
+        a = fn(atk)
+        b = fn(ben)
+        ratio = (a / b) if b else float("inf")
+        a_s = f"{a*100:.2f}%" if a else "n/a"
+        print(f"  {name:<20} {a_s:>14} {b*100:>11.3f}% "
+              f"{(f'{ratio:.1f}x' if b and a else '-'):>9}")
+
+    print("\nTHE LOW-OVERLAP HALF (what a burst does NOT share)")
+    def uniq(rows, val):
+        vals = [val(e) for e in rows if val(e) is not None]
+        return (len(set(vals)) / len(vals)) if vals else 0.0
+    for name, val in (("card.last4", lambda e: (e.get("card") or {}).get("last4")),
+                      ("email", lambda e: e["email"]),
+                      ("contact", lambda e: e["contact"]),
+                      ("session_id", lambda e: mc(e)["session_id"])):
+        print(f"  {name:<14} distinct/total  attack {uniq(atk, val)*100:6.2f}%   "
+              f"benign {uniq(ben, val)*100:6.2f}%")
+    for name, val in (("account_id", lambda e: mc(e)["account_id"]),
+                      ("shipping_pincode", lambda e: mc(e)["shipping_pincode"])):
+        an = sum(1 for e in atk if val(e) is None) / max(len(atk), 1)
+        bn = sum(1 for e in ben if val(e) is None) / max(len(ben), 1)
+        print(f"  {name:<14} null rate       attack {an*100:6.2f}%   benign {bn*100:6.2f}%")
+
+    print("\nCATEGORY E LEAK CHECKS")
+    ids = [e["id"] for e in events]
+    ts = [e["created_at"] for e in events]
+    print(f"  rows sorted by created_at        : {ts == sorted(ts)}")
+    print(f"  ids monotonic with created_at    : {ids == sorted(ids)}")
+    labels = [lab[e["id"]]["label"] for e in events]
+    runs, cur = [], labels[0]
+    ln = 0
+    for x in labels:
+        if x == cur:
+            ln += 1
+        else:
+            runs.append((cur, ln)); cur, ln = x, 1
+    runs.append((cur, ln))
+    longest = max((l for v, l in runs if v == 1), default=0)
+    print(f"  longest consecutive attack run   : {longest} rows "
+          f"(largest burst is {max(per_burst.values(), default=0)} events)")
+    hours = {_dt.datetime.fromtimestamp(e["created_at"] + IST_OFFSET, _dt.timezone.utc).hour
+             for e in atk}
+    print(f"  distinct hours containing attack : {len(hours)}/24")
+    # A substring like "bad" occurs by chance in hex and base62 identifiers, so a
+    # raw hit is meaningless. What matters is whether it occurs MORE often in
+    # attack identifiers than in legitimate ones.
+    tells = ("attack", "bot", "fraud", "ring", "test", "legit", "evil", "bad", "atk")
+    # Only fields the generator CHOOSES are checked. `id` and `order_id` come from
+    # one monotonic base62 sequence that never sees a label, so substrings like
+    # "bot" turn up in them by chance (pay_0000000DJboT3o) and mean nothing.
+    def tell_rate(rows, needle):
+        if not rows:
+            return 0.0
+        return sum(1 for e in rows
+                   if needle in (e["email"] + mc(e)["device_id"]
+                                 + mc(e)["session_id"]).lower()) / len(rows)
+    flagged = []
+    for needle in tells:
+        ra, rb = tell_rate(atk, needle), tell_rate(ben, needle)
+        if ra > 0 and (rb == 0 or ra / rb > 2.0):
+            flagged.append(f"{needle} (attack {ra*100:.3f}% vs benign {rb*100:.3f}%)")
+    print(f"  string tells enriched in attack  : {flagged or 'NONE'}")
+    adom = {e["email"].split('@')[1] for e in atk}
+    bdom = {e["email"].split('@')[1] for e in ben}
+    print(f"  attack email domains not seen in benign: {sorted(adom - bdom) or 'NONE'}")
+    aiin = {e["card"]["iin"] for e in atk if e.get("card")}
+    biin = {e["card"]["iin"] for e in ben if e.get("card")}
+    print(f"  attack IINs not seen in benign   : {sorted(aiin - biin) or 'NONE'}")
+    print()
