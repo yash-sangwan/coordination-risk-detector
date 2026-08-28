@@ -115,6 +115,15 @@ _LAST = ["sharma", "verma", "patel", "reddy", "nair", "iyer", "singh", "gupta",
          "mehta", "shah", "das", "bose", "rao", "menon", "kapoor", "joshi"]
 
 
+def format_contact(rng, digits: str) -> str:
+    """Apply the +91 / bare normalisation inconsistency the schema asks for.
+
+    Drawn independently of the label: the same probability is used for
+    legitimate actors and for attack identities.
+    """
+    return ("+91" + digits) if rng.random() < C.CONTACT_PLUS91_SHARE else digits
+
+
 def _email_local(rng, shape: int) -> str:
     """Several local-part shapes, all used by both real people and, later, by
     attackers. Shape classes must overlap between populations (spec 4)."""
@@ -154,10 +163,15 @@ def build_population(rng, n_actors: int, window_start: int, window_end: int):
         else:
             signup = window_start - rng.randint(1, 900) * 86400
 
-        contact = "9" + "".join(str(rng.randint(0, 9)) for _ in range(9))
+        contact_digits = "9" + "".join(str(rng.randint(0, 9)) for _ in range(9))
+        contact = format_contact(rng, contact_digits)
 
         if rng.random() < C.VPA_FROM_PHONE_SHARE:
-            vpa_local = contact
+            # Bare digits, never the formatted contact. A real UPI handle is
+            # 9876543210@okhdfcbank, never +919876543210@okhdfcbank, and taking
+            # the formatted string also broke the isdigit() check that propagates
+            # a shared phone into a shared VPA.
+            vpa_local = contact_digits
         else:
             # Wider suffix than the email pool: a name-shaped VPA local part drawn
             # from a small pool collides far above the phone-derived rate, which
@@ -227,7 +241,9 @@ def build_population(rng, n_actors: int, window_start: int, window_end: int):
         a, b = actors[pidx[k]], actors[pidx[k + 1]]
         b.contact = a.contact
         if b.vpa and b.vpa.split("@")[0].isdigit():
-            b.vpa = f"{a.contact}@{b.vpa.split('@')[1]}"
+            # Match on the bare digits of a's phone, since that is what a
+            # phone-derived VPA local part contains.
+            b.vpa = f"{a.contact.lstrip('+').removeprefix('91')}@{b.vpa.split('@')[1]}"
 
     diagnostics = {
         "iin_pair_collision_analytic": iin_collision,

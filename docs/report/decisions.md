@@ -107,3 +107,13 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 - **Chose:** Keep the merchant at 40,000 actors and accept that attack share runs about 5.4% overall with peak days near 40%, well above the cited 8%-at-peak anchor.
 - **Rejected:** Scaling the merchant to reach 8%.
 - **Why:** Measured cost. Attack volume is absolute (3,644 events at every size tested), so only the legitimate side scales, and reaching 8% needs about 333,000 actors. That is roughly 10 minutes per generation, over 1.3 GB peak memory and ~400 MB on disk, which would push the five-seed T3 sweep past an hour. Too expensive for the time available. More to the point, it only dilutes the ratio; it does nothing about *why* volume separated the classes, which was the weak flash-sale confounder fixed in the same commit. Recorded as a known limitation to state plainly rather than a problem we believe is solved.
+
+---
+
+### 2026-08-28 — Ring drop pincodes drawn unweighted, and no finer address field
+
+- **Chose:** Draw a ring's drop pincode uniformly over the pincode list rather than from the traffic-weighted distribution used for a customer's home pincode.
+- **Rejected:** Two things. The traffic-weighted draw, and adding an address hash finer than pincode.
+- **Why unweighted:** A controlled drop address is chosen for operational control, not for being in a busy commercial area. Under the weighted draw, 2 of 3 rings landed on hot urban pincodes shared with 125 and 130 innocent accounts, so the drop address carried almost no information: maximum precision from pincode alone was 0.053 and 0.078. Drops now sit on clusters of 7 to 11 accounts.
+- **Why no address hash:** it would work far too well. A per-flat identifier would have near-zero benign collision, so "two accounts share an address" would be close to a pure label. That is exactly the failure `device_id` is showing right now at a 1746x attack-to-benign ratio in pair units. Adding a second attribute with the same defect would buy detectability by planting the answer.
+- **Leak checked, not assumed:** rarity does not become the label, because rare pincodes are ordinary for legitimate traffic. 69.0% of benign orders already land on a pincode with 15 or fewer accounts, and the benign cluster distribution is unchanged (median 1, p90 10, max 141). T1 AUC for `shipping_pincode` moved 0.8776 to 0.8846, and the rarity-only variant 0.8765 to 0.8809. No jump.

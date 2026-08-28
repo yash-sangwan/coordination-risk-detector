@@ -281,6 +281,14 @@ DEVICE_SHARE_RATE = 0.072              # assigned rate. Only ~62% of actors tran
                                        # This lands the OBSERVED rate on the spec 4 target of 6%.
 DEVICE_HOUSEHOLD_SIZE = (2, 3)
 
+# The probe found real Razorpay data normalises phone numbers inconsistently:
+# "+919000000000" on a payment link, "9000000001" on a customer. The schema says
+# to carry that. Format is drawn per identity with the SAME probability for
+# legitimate and attack traffic, because spec section 0.5 requires it to be
+# independent of the label. A shared phone is copied as an already formatted
+# string, so sharing pairs still match exactly.
+CONTACT_PLUS91_SHARE = 0.35            # ASSUMPTION
+
 CONTACT_SHARE_RATE = 0.025             # assigned rate, same observability correction.
                                        # Lands observed on the spec 4 target of 1.5%.
 

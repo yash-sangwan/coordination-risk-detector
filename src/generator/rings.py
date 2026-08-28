@@ -33,6 +33,7 @@ class Ring:
 def build_rings(rng, actors, window_start, window_end):
     """Assemble rings out of existing actors. Returns (rings, membership)."""
     pin_pairs, _, _ = build_pincode_table()
+    pincode_values = [p for p, _ in pin_pairs]
     iin_pairs, _ = build_iin_table()
     span = window_end - window_start
 
@@ -63,7 +64,12 @@ def build_rings(rng, actors, window_start, window_end):
             if caught >= window_end:
                 caught = None
 
-        drop = _weighted(rng, pin_pairs)
+        # Unweighted draw, deliberately not the traffic-weighted one used for a
+        # customer's home pincode. A controlled drop address is chosen for
+        # operational control, not for being in a busy commercial area, and the
+        # weighted draw put 2 of 3 rings on hot pincodes shared with 125-130
+        # innocent accounts, where the drop address carried no information.
+        drop = rng.choice(pincode_values)
         shared_device = f"dev_{rng.getrandbits(48):012x}"
         shape = rng.randint(0, 4)
 

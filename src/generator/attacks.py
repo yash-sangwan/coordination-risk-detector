@@ -17,7 +17,7 @@ from typing import Optional
 
 from . import config as C
 from .population import (_email_local, _weighted, build_iin_table,
-                         build_pincode_table)
+                         build_pincode_table, format_contact)
 
 
 @dataclass
@@ -201,7 +201,8 @@ def burst_attempts(rng, burst: Burst, legit_amount_fn, minter_free=True):
             dom = rng.choice(["airtelmail.in", "bsnl.in", "acme-corp.in", "vsnl.net",
                               "zoho.in", "icloud.com", "gmx.com", "mail.in"])
         email = f"{_email_local(rng, rng.randint(0, 4))}@{dom}"
-        contact = "9" + "".join(str(rng.randint(0, 9)) for _ in range(9))
+        contact = format_contact(rng, "9" + "".join(str(rng.randint(0, 9))
+                                                    for _ in range(9)))
 
         # "Usually" null, not always. A bot that registers an account, or one
         # buying something that ships, both happen. If attack traffic were 100%
