@@ -43,7 +43,8 @@ def draw_checkout_ms(rng, actor_class: str) -> int:
     return max(120, min(v, 600000))
 
 
-def decline_probability(method, international, ts, tier, downtimes):
+def decline_probability(method, international, ts, tier, downtimes,
+                        flash_mult=1.0):
     """Compose the decline probability for one attempt.
 
     Base is the cited per-method rate. Then three multipliers: evening bank load,
@@ -69,6 +70,11 @@ def decline_probability(method, international, ts, tier, downtimes):
     # after normalisation rather than folded into it.
     mult, active = downtime_multiplier(downtimes, ts, method)
     p *= mult
+
+    # Bank strain under sale load, same mechanism as the evening peak.
+    if flash_mult > 1.0:
+        frac = min((flash_mult - 1.0) / (C.FLASH_STRAIN_REFERENCE_MULT - 1.0), 1.0)
+        p *= 1.0 + frac * (C.FLASH_DECLINE_STRAIN_MAX - 1.0)
 
     return min(p, 0.95), active
 
@@ -128,7 +134,7 @@ def sessions_for_actor(rng, actor, timeline, window_days):
     return sorted(out)
 
 
-def attempts_for_session(rng, actor, ts, downtimes):
+def attempts_for_session(rng, actor, ts, downtimes, flash_mult=1.0):
     """One session becomes one or more attempts.
 
     Returns a list of dicts describing attempts. Retries share the order_id and
@@ -152,7 +158,7 @@ def attempts_for_session(rng, actor, ts, downtimes):
     cur_ts = ts
     while seq <= C.MAX_ATTEMPTS_PER_SESSION:
         p, dt_active = decline_probability(method, international, cur_ts,
-                                           actor.tier, downtimes)
+                                           actor.tier, downtimes, flash_mult)
         failed = rng.random() < p
         reason = draw_decline_reason(rng, dt_active) if failed else None
         attempts.append({

@@ -99,3 +99,11 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 - **Chose:** Correct the spec. The `vpa` local part target is now the formula `contact_rate x 0.92^2 x 0.72`, evaluating to about 1.03%, with the dependency on `contact` recorded so a later change to one does not silently break the other.
 - **Rejected:** Tuning the generator to reach the original 1.5%.
 - **Why:** The 1.5% was copied from the `contact` row rather than derived. A VPA local part is the phone number for 92% of actors, so a collision needs a shared phone, both actors drawing phone-derived VPAs, and both actually paying by UPI inside the window. Only two levers could have forced 1.5%: raising `VPA_FROM_PHONE_SHARE` toward 1.0, which asserts that essentially every Indian UPI handle is a phone number and is false, or raising `CONTACT_SHARE_RATE`, which breaks a passing attribute to fix a derived one. Both mean changing the modelled world to fit a number we invented, which is the failure mode section 4 exists to prevent.
+
+---
+
+### 2026-08-28 — Merchant size deferred, recorded as a known limitation
+
+- **Chose:** Keep the merchant at 40,000 actors and accept that attack share runs about 5.4% overall with peak days near 40%, well above the cited 8%-at-peak anchor.
+- **Rejected:** Scaling the merchant to reach 8%.
+- **Why:** Measured cost. Attack volume is absolute (3,644 events at every size tested), so only the legitimate side scales, and reaching 8% needs about 333,000 actors. That is roughly 10 minutes per generation, over 1.3 GB peak memory and ~400 MB on disk, which would push the five-seed T3 sweep past an hour. Too expensive for the time available. More to the point, it only dilutes the ratio; it does nothing about *why* volume separated the classes, which was the weak flash-sale confounder fixed in the same commit. Recorded as a known limitation to state plainly rather than a problem we believe is solved.

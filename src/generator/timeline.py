@@ -86,7 +86,14 @@ def schedule_downtimes(rng, window_start: int, window_end: int):
 
 
 class Timeline:
-    """Hourly intensity profile with an inverse-CDF sampler."""
+    """Baseline hourly demand profile with an inverse-CDF sampler.
+
+    Flash sales are deliberately NOT in these weights. Folding a multiplier into
+    the profile only redistributes a session count that is fixed by the actor
+    population, so a sale concentrated existing demand instead of creating extra
+    and never reached its stated multiplier. Sales are additive now, see
+    flash_sale_extra_sessions below.
+    """
 
     def __init__(self, window_start: int, window_end: int, flash_sales):
         self.window_start = window_start
@@ -102,10 +109,6 @@ class Timeline:
             w *= C.DOW_WEIGHTS[local.weekday()]
             if local.day in C.PAYDAY_DAYS:
                 w *= C.PAYDAY_MULT
-            for s in flash_sales:
-                if s["start"] <= hour_start < s["end"]:
-                    w *= s["multiplier"]
-                    break
             self.weights.append(w)
 
         self.total = sum(self.weights)
@@ -123,6 +126,60 @@ class Timeline:
 
     def in_flash_sale(self, ts: int) -> bool:
         return any(s["start"] <= ts < s["end"] for s in self.flash_sales)
+
+    def flash_multiplier(self, ts: int) -> float:
+        for s in self.flash_sales:
+            if s["start"] <= ts < s["end"]:
+                return s["multiplier"]
+        return 1.0
+
+
+def flash_sale_extra_sessions(rng, flash_sales, base_sessions, actors):
+    """Sessions a sale ADDS on top of baseline demand.
+
+    A sale creates incremental purchases; it does not merely move existing ones
+    around. The extra count is measured against the baseline that actually landed
+    in the window, so a stated multiplier of Nx really produces N times the
+    traffic rather than N times the share of a fixed total.
+
+    Buyers are drawn from the same actor population, weighted by how often they
+    normally buy, so a sale brings in real customers with their real devices,
+    instruments, pincodes and phone numbers. Volume is the only thing that
+    changes: what the events SHARE is untouched, which is the whole point of
+    keeping this confounder honest.
+    """
+    if not flash_sales:
+        return []
+
+    by_ts = sorted(t for t, _ in base_sessions)
+    out = []
+    for s in flash_sales:
+        lo = bisect.bisect_left(by_ts, s["start"])
+        hi = bisect.bisect_left(by_ts, s["end"])
+        baseline_n = hi - lo
+        if baseline_n <= 0:
+            continue
+        extra_n = int(round(baseline_n * (s["multiplier"] - 1.0)))
+
+        # Only actors who already exist can shop in the sale.
+        eligible = [a for a in actors if a.signup_ts <= s["start"]]
+        if not eligible:
+            continue
+        weights = [max(a.monthly_rate, 0.05) for a in eligible]
+        total_w = sum(weights)
+
+        for _ in range(extra_n):
+            x = rng.random() * total_w
+            upto = 0.0
+            pick = eligible[-1]
+            for a, w in zip(eligible, weights):
+                upto += w
+                if x <= upto:
+                    pick = a
+                    break
+            ts = rng.randint(s["start"], max(s["start"], s["end"] - 1))
+            out.append((ts, pick))
+    return out
 
 
 def downtime_multiplier(downtimes, ts: int, method: str):

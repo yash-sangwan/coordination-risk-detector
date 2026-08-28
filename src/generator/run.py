@@ -17,7 +17,8 @@ from .ids import IdMinter
 from .population import build_population
 from .attacks import burst_attempts, schedule_campaign
 from .behaviour import attempts_for_session, draw_amount, sessions_for_actor
-from .timeline import Timeline, schedule_downtimes, schedule_flash_sales
+from .timeline import (Timeline, flash_sale_extra_sessions,
+                       schedule_downtimes, schedule_flash_sales)
 
 WALLETS = ["paytm", "phonepe", "amazonpay", "mobikwik", "freecharge"]
 
@@ -43,17 +44,28 @@ def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True):
 
     # Actors act. Collect (ts, actor, attempt) then sort by time, so the stream is
     # time-ordered and no population occupies a contiguous block.
-    pending = []
+    # Phase 1: baseline demand. Phase 2: the extra sessions a flash sale creates
+    # on top of it. Sales used to be folded into the intensity profile, which only
+    # moved a fixed session count around and never reached the stated multiplier.
+    base_sessions = []
     for actor in actors:
         for ts in sessions_for_actor(rng_beh, actor, timeline, days):
-            attempts = attempts_for_session(rng_beh, actor, ts, downtimes)
-            wallet = rng_beh.choice(WALLETS)
-            sid = f"sess_{rng_beh.getrandbits(48):012x}"
-            for a in attempts:
-                a["session_id"] = sid
-                a["wallet"] = wallet
-                a["label"] = 0
-                pending.append((a["ts"], actor, a))
+            base_sessions.append((ts, actor))
+
+    extra_sessions = flash_sale_extra_sessions(rng_cal, flash_sales,
+                                               base_sessions, actors)
+
+    pending = []
+    for ts, actor in base_sessions + extra_sessions:
+        fm = timeline.flash_multiplier(ts)
+        attempts = attempts_for_session(rng_beh, actor, ts, downtimes, fm)
+        wallet = rng_beh.choice(WALLETS)
+        sid = f"sess_{rng_beh.getrandbits(48):012x}"
+        for a in attempts:
+            a["session_id"] = sid
+            a["wallet"] = wallet
+            a["label"] = 0
+            pending.append((a["ts"], actor, a))
 
     # Card testing bursts. Attack attempts join the same list before it is sorted,
     # so they interleave by created_at and never occupy a contiguous block.

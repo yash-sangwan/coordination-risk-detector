@@ -151,6 +151,14 @@ METHOD_DECLINE = {
 EVENING_HOURS = (19, 20, 21)
 EVENING_DECLINE_MULT = 2.5             # ASSUMPTION, see C2
 
+# Flash sales strain the banks the same way the evening peak does, so a high
+# volume window with elevated declines is NORMAL rather than suspicious. Without
+# this, "busy and failing" would point straight at an attack. Applied after
+# normalisation, like downtime, because a sale is an excursion above the blended
+# baseline rather than part of it.
+FLASH_DECLINE_STRAIN_MAX = 2.4         # ASSUMPTION, at the top sale multiplier
+FLASH_STRAIN_REFERENCE_MULT = 15.0     # sale multiplier at which the max applies
+
 # Geography as relative modifier, not absolute level (see C4).
 TIER_DECLINE_MULT = {"metro": 1.0, "tier2": 1.6, "tier3": 2.4}   # ASSUMPTION
 TIER_SHARE = {"metro": 0.45, "tier2": 0.33, "tier3": 0.22}       # ASSUMPTION
