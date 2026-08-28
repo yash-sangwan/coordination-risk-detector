@@ -1,2 +1,5 @@
 .env
 notes/
+data/
+__pycache__/
+*.pyc
