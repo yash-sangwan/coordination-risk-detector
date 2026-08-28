@@ -64,3 +64,13 @@ Source: event-schema.md (private working doc), Deviations §3.
 - **The cost we accept:** synthetic data invites the charge that we planted the signal we then found. That is answered by the acceptance tests in the generator spec, not by argument.
 
 Sources: [IEEE-CIS data description](https://www.kaggle.com/competitions/ieee-fraud-detection/data), [1st place solution writeup](https://www.kaggle.com/competitions/ieee-fraud-detection/writeups/fraudsquad-1st-place-solution-part-2), [Fraud Dataset Benchmark](https://arxiv.org/pdf/2208.14417). On why not to synthesise with an off-the-shelf tabular generator: [arXiv 2604.13125](https://arxiv.org/pdf/2604.13125) finds such generators fail to preserve temporal, velocity and multi-account signals specifically.
+
+---
+
+### 2026-08-28 — Cut `ip_prefix` and all IP-based linking
+
+- **Chose:** Drop `ip_prefix` from the record and remove IP entirely as a linking attribute.
+- **Rejected:** Keeping a /24 prefix as a medium-strength edge for detecting bot pools.
+- **Why:** Jio, Airtel, BSNL and ACT all place subscribers behind carrier-grade NAT, and Indian mobile broadband is almost always CGNAT'd, so two unrelated users sharing a /24 is unremarkable and the edge carries almost no information here. Compounding it, no subscribers-per-shared-address figure could be sourced, so its benign collision rate would have been invented for the one attribute most needing a real number. Reversible: if a citable benign rate turns up, this is the first attribute to restore.
+
+Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-carrier-grade-nat-cgn-cgnat/), [PureVPN list of ISPs using CGNAT](https://www.purevpn.com/blog/top-isps-using-cgnat/).
