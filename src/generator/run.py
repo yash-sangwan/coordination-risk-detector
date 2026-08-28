@@ -15,6 +15,7 @@ from . import config as C
 from .emit import build_row, sealed_record, write_manifest, write_stream, CUT_FIELDS
 from .ids import IdMinter
 from .population import build_population
+from .rings import build_rings, ring_active, ring_extra_sessions
 from .attacks import burst_attempts, schedule_campaign
 from .behaviour import attempts_for_session, draw_amount, sessions_for_actor
 from .timeline import (Timeline, flash_sale_extra_sessions,
@@ -38,6 +39,12 @@ def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True):
 
     actors, diag = build_population(rng_pop, n_actors, window_start, window_end)
 
+    rng_ring = random.Random(seed ^ 0x5217)
+    rings, membership = ([], {})
+    if with_attacks:
+        rings, membership = build_rings(rng_ring, actors, window_start, window_end)
+    actors_by_id = {a.actor_id: a for a in actors}
+
     flash_sales = schedule_flash_sales(rng_cal, window_start, window_end)
     downtimes = schedule_downtimes(rng_cal, window_start, window_end)
     timeline = Timeline(window_start, window_end, flash_sales)
@@ -54,6 +61,8 @@ def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True):
 
     extra_sessions = flash_sale_extra_sessions(rng_cal, flash_sales,
                                                base_sessions, actors)
+    # Ring activity: low rate, spread across weeks, never bursty.
+    extra_sessions += ring_extra_sessions(rng_ring, rings, actors_by_id, window_end)
 
     pending = []
     for ts, actor in base_sessions + extra_sessions:
@@ -61,10 +70,18 @@ def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True):
         attempts = attempts_for_session(rng_beh, actor, ts, downtimes, fm)
         wallet = rng_beh.choice(WALLETS)
         sid = f"sess_{rng_beh.getrandbits(48):012x}"
+        # A ring member's events are fraudulent only while the ring is live.
+        # Everything before activation is that member building normal history.
+        ring = membership.get(actor.actor_id)
         for a in attempts:
             a["session_id"] = sid
             a["wallet"] = wallet
-            a["label"] = 0
+            if ring is not None and ring_active(ring, a["ts"], window_end):
+                a["label"] = 1
+                a["attack_type"] = "ring"
+                a["ring_id"] = ring.ring_id
+            else:
+                a["label"] = 0
             pending.append((a["ts"], actor, a))
 
     # Card testing bursts. Attack attempts join the same list before it is sorted,
@@ -77,6 +94,7 @@ def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True):
                 # session_id is new per attempt: card testing does not browse.
                 a["session_id"] = f"sess_{rng_atk.getrandbits(48):012x}"
                 a["label"] = 1
+                a["attack_type"] = "card_testing"
                 pending.append((ts_a, ident, a))
 
     pending.sort(key=lambda t: (t[0], t[1].actor_id, t[2]["attempt_seq"]))
@@ -123,6 +141,16 @@ def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True):
         "n_events": len(rows),
         "contains_attacks": bool(bursts),
         "n_attack_events": sum(1 for s in sealed if s["label"] == 1),
+        "n_card_testing_events": sum(1 for s in sealed if s["attack_type"] == "card_testing"),
+        "n_ring_events": sum(1 for s in sealed if s["attack_type"] == "ring"),
+        "rings": [
+            {"ring_id": r.ring_id, "size": len(r.member_ids),
+             "drop_pincode": r.drop_pincode, "activation": r.activation_ts,
+             "caught": r.caught_ts,
+             "active_days": round(((r.caught_ts or window_end) - r.activation_ts) / 86400, 1),
+             "never_caught": r.caught_ts is None}
+            for r in rings
+        ],
         "label_note": ("card testing bursts present, labels in the sealed store only"
                        if bursts else "legitimate traffic only, every sealed label is 0"),
         "bursts": [

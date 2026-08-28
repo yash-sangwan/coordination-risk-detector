@@ -250,6 +250,20 @@ BURST_ENDINGS = [("exhausted", 0.50), ("blocked", 0.35), ("moves_on", 0.15)]
 BURST_DECAY_MINUTES = (10, 20)         # for the moves_on ending
 
 # --------------------------------------------------------------------------
+# 2.2 Rings
+# --------------------------------------------------------------------------
+# The inverse of a burst: low fanout, high overlap, weeks rather than minutes.
+RING_COUNT = (3, 5)                    # ASSUMPTION
+RING_SIZE = (3, 15)                    # spec 2.2
+RING_SIGNUP_SPREAD_DAYS = (5, 25)      # "created over days or weeks"
+RING_DORMANCY_DAYS = (5, 20)           # spec 2.2: rings have a dormancy period
+RING_DEVICE_SUBSET = (0.30, 0.60)      # ASSUMPTION, a subset shares a device
+RING_CONTACT_REUSE_PROB = 0.25         # ASSUMPTION, "occasional carelessness"
+RING_SESSIONS_PER_DAY = (0.15, 0.45)   # ASSUMPTION. Low rate, never bursty.
+RING_CAUGHT_PROB = 0.70                # ASSUMPTION
+RING_CAUGHT_AFTER_DAYS = (4, 16)       # ASSUMPTION
+
+# --------------------------------------------------------------------------
 # 4. Benign collision structure
 # --------------------------------------------------------------------------
 # card.iin: 10 issuers x 2 IINs each, 80/20 intra-issuer split.

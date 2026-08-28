@@ -111,8 +111,9 @@ def sealed_record(row, actor, attempt, in_flash_sale, label=0):
     return {
         "id": row["id"],
         "label": label,
-        "attack_type": "card_testing" if label else None,
+        "attack_type": attempt.get("attack_type") if label else None,
         "burst_id": attempt.get("burst_id"),
+        "ring_id": attempt.get("ring_id"),
         "actor_id": actor.actor_id,
         "actor_class": actor.actor_class,
         "tier": actor.tier,
