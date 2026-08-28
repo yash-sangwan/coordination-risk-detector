@@ -85,14 +85,14 @@ def build_iin_table():
 
 
 def build_pincode_table():
-    """Skewed pincode population.
+    """Skewed pincode population, realistic 19,000-pincode shape.
 
-    See config.SPEC_CONFLICTS C1: the spec's two targets (top-50 carrying 25%,
-    and 2-4% pair collision) cannot both hold. This builds the realistic shape by
-    default and reports the achieved collision rate rather than forcing it.
+    Top-50 carry 25%, which yields a 0.147% pair-collision rate. The spec once
+    asked for 2-4% as well; that needs an effective population of 25-50 pincodes
+    and is arithmetically incompatible with the top-50 figure, so it was corrected
+    in section 4 rather than forced here.
     """
-    tiers = (C.PINCODE_TIERS_CONCENTRATED if C.PINCODE_CONCENTRATED
-             else C.PINCODE_TIERS_REALISTIC)
+    tiers = C.PINCODE_TIERS
     pairs = []
     code = 110001
     for count, share in tiers:
@@ -233,7 +233,7 @@ def build_population(rng, n_actors: int, window_start: int, window_end: int):
         "iin_pair_collision_analytic": iin_collision,
         "pincode_pair_collision_analytic": pin_collision,
         "pincode_top50_share": pin_top50,
-        "pincode_shape": "concentrated" if C.PINCODE_CONCENTRATED else "realistic",
+        "pincode_shape": "realistic-19k",
         "households_formed": households,
         "n_actors": n_actors,
     }

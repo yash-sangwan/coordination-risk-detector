@@ -74,3 +74,20 @@ Sources: [IEEE-CIS data description](https://www.kaggle.com/competitions/ieee-fr
 - **Why:** Jio, Airtel, BSNL and ACT all place subscribers behind carrier-grade NAT, and Indian mobile broadband is almost always CGNAT'd, so two unrelated users sharing a /24 is unremarkable and the edge carries almost no information here. Compounding it, no subscribers-per-shared-address figure could be sourced, so its benign collision rate would have been invented for the one attribute most needing a real number. Reversible: if a citable benign rate turns up, this is the first attribute to restore.
 
 Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-carrier-grade-nat-cgn-cgnat/), [PureVPN list of ISPs using CGNAT](https://www.purevpn.com/blog/top-isps-using-cgnat/).
+
+---
+
+### 2026-08-28 — Pincode distribution kept realistic, spec target corrected
+
+- **Chose:** The realistic 19,000-pincode shape, top-50 carrying 25% of orders, giving a 0.147% pair-collision rate. Section 4 of the spec was corrected to state that derived value.
+- **Rejected:** The spec's original 2-4% pair-collision target, and any switch that would let us generate a concentrated shape instead.
+- **Why:** The two numbers are arithmetically incompatible. Pair collision is `sum(p_i^2)`, so 2-4% implies an effective population of 25-50 pincodes, meaning essentially every order arrives from about 33 postcodes. That is not India. Only the concentration curve is grounded in a real mechanism, so the collision rate is now derived from it rather than asserted beside it.
+- **Why the low rate is correct, not a shortfall:** pincode is our ring edge, and rings converge on drop addresses. The rarer an innocent pincode collision, the stronger the evidence when one is observed. This is the exact opposite of the `vpa` handle, which is deliberately near-worthless because it collides constantly.
+
+---
+
+### 2026-08-28 — Decline rate measured on attempts, not sessions
+
+- **Chose:** Model decline at the gateway-attempt level, driven by the per-method rates (UPI 99.2%, cards 85-90%, netbanking 90-95%). Measured overall decline is about 5.5%.
+- **Rejected:** Calibrating the stream to the cited 68-74% D2C success figure, which would imply roughly 26-32% decline.
+- **Why:** Different denominators. The 68-74% figure is end-to-end and includes pre-gateway checkout abandonment, which never becomes a payment attempt and therefore never becomes a row in this stream. Our record is one attempt at the gateway, so the per-method rates govern. Forcing the stream to 28% decline would have meant inventing failures the gateway never sees.

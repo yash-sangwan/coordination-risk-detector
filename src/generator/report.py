@@ -180,9 +180,9 @@ def main(path):
     pins = [e["merchant_context"]["shipping_pincode"] for e in events]
     cnt = collections.Counter(pins)
     top50 = sum(c for _, c in cnt.most_common(50)) / n
-    print(f"\n  6. merchant_context.shipping_pincode   [shape: {diag['pincode_shape']}]")
+    print(f"\n  6. merchant_context.shipping_pincode")
     print(f"     top-50 share                  : {top50*100:6.2f}%   [~25%]")
-    print(f"     pair collision                : {pair_collision(pins)*100:6.2f}%   [2-4%  SEE CONFLICT C1]")
+    print(f"     pair collision                : {pair_collision(pins)*100:6.3f}%   [0.147% analytic]")
     print(f"     distinct pincodes seen        : {len(set(pins))}")
 
     print("\nOTHER SPEC 4 CONSTRAINTS")
