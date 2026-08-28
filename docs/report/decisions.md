@@ -91,3 +91,11 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 - **Chose:** Model decline at the gateway-attempt level, driven by the per-method rates (UPI 99.2%, cards 85-90%, netbanking 90-95%). Measured overall decline is about 5.5%.
 - **Rejected:** Calibrating the stream to the cited 68-74% D2C success figure, which would imply roughly 26-32% decline.
 - **Why:** Different denominators. The 68-74% figure is end-to-end and includes pre-gateway checkout abandonment, which never becomes a payment attempt and therefore never becomes a row in this stream. Our record is one attempt at the gateway, so the per-method rates govern. Forcing the stream to 28% decline would have meant inventing failures the gateway never sees.
+
+---
+
+### 2026-08-28 — vpa local part target was inherited from contact, not derived
+
+- **Chose:** Correct the spec. The `vpa` local part target is now the formula `contact_rate x 0.92^2 x 0.72`, evaluating to about 1.03%, with the dependency on `contact` recorded so a later change to one does not silently break the other.
+- **Rejected:** Tuning the generator to reach the original 1.5%.
+- **Why:** The 1.5% was copied from the `contact` row rather than derived. A VPA local part is the phone number for 92% of actors, so a collision needs a shared phone, both actors drawing phone-derived VPAs, and both actually paying by UPI inside the window. Only two levers could have forced 1.5%: raising `VPA_FROM_PHONE_SHARE` toward 1.0, which asserts that essentially every Indian UPI handle is a phone number and is false, or raising `CONTACT_SHARE_RATE`, which breaks a passing attribute to fix a derived one. Both mean changing the modelled world to fit a number we invented, which is the failure mode section 4 exists to prevent.
