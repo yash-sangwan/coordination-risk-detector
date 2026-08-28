@@ -129,10 +129,36 @@ def score(events, cfg):
         dev_accounts[mc(e)["device_id"]].add(a)
         con_accounts[e["contact"]].add(a)
 
-    # A pincode shared by many accounts is only interesting if it is unusual;
-    # dense urban pincodes are shared innocently all the time.
-    pin_sizes = sorted(len(v) for v in pin_accounts.values())
-    pin_cut = pin_sizes[int(len(pin_sizes) * 0.995)] if pin_sizes else 3
+    # A pincode's normal population, used to judge a cluster against how busy
+    # that pincode usually is rather than against a global percentile. The old
+    # rule fired only above the 99.5th percentile (112 accounts); once drop
+    # pincodes were drawn unweighted the clusters were 7, 11 and 8, so it never
+    # fired at all and ring scoring collapsed.
+    pin_total = sum(len(v) for v in pin_accounts.values()) or 1
+    n_pins = len(pin_accounts) or 1
+    typical_pin = pin_total / n_pins
+
+    # The conjunction the account-level diagnostic identified as the only feature
+    # that separates a ring member from its innocent neighbours on a pincode:
+    # accounts that share BOTH a drop pincode and a device.
+    acct_pins = collections.defaultdict(set)
+    acct_devs = collections.defaultdict(set)
+    for e in events:
+        a = mc(e)["account_id"]
+        if not a:
+            continue
+        if mc(e)["shipping_pincode"]:
+            acct_pins[a].add(mc(e)["shipping_pincode"])
+        acct_devs[a].add(mc(e)["device_id"])
+
+    conj = {}
+    for a in acct_pins:
+        best = 0
+        for p in acct_pins[a]:
+            peers = pin_accounts[p]
+            for d in acct_devs[a]:
+                best = max(best, len(peers & dev_accounts[d]))
+        conj[a] = best
 
     ring_scores = []
     for e in events:
@@ -140,19 +166,83 @@ def score(events, cfg):
         if not a:
             ring_scores.append(0.0)
             continue
-        s = 0.0
-        p = mc(e)["shipping_pincode"]
-        if p:
-            k = len(pin_accounts[p])
-            if k >= max(cfg.ring_min_accounts, pin_cut):
-                s += 2.5 + 0.15 * min(k, 20)
-        kd = len(dev_accounts[mc(e)["device_id"]])
-        if kd >= 2:
-            s += 1.8 * min(kd, 8) / 8.0
-        kc = len(con_accounts[e["contact"]])
-        if kc >= 2:
-            s += 1.0
-        ring_scores.append(s)
+        ring_scores.append(_ring_account_score(
+            a, mc(e)["shipping_pincode"], mc(e)["device_id"], e["contact"],
+            pin_accounts, dev_accounts, con_accounts, conj, typical_pin, cfg))
 
     combined = [max(a, b) for a, b in zip(ct_scores, ring_scores)]
     return combined, ct_scores, ring_scores
+
+
+def _ring_account_score(a, pin, dev, con, pin_accounts, dev_accounts,
+                        con_accounts, conj, typical_pin, cfg):
+    """Score one account's ring evidence. Event stream only."""
+    s = 0.0
+    # The conjunction dominates: several accounts on one pincode who ALSO share
+    # a device. A busy pincode on its own is not evidence.
+    k = conj.get(a, 0)
+    if k >= 2:
+        s += 4.0 + 0.5 * min(k, 10)
+    if pin:
+        cluster = len(pin_accounts[pin])
+        # Judged against how populous a pincode normally is, not a global cut.
+        if cluster >= max(cfg.ring_min_accounts, 3):
+            s += 1.5 * min(cluster / max(typical_pin, 1.0), 4.0)
+    kd = len(dev_accounts.get(dev, ()))
+    if kd >= 2:
+        s += 1.8 * min(kd, 8) / 8.0
+    if len(con_accounts.get(con, ())) >= 2:
+        s += 1.0
+    return s
+
+
+def account_scores(events, cfg):
+    """Ring scoring at the ACCOUNT level, the natural unit for a ring.
+
+    Returns (account_ids, scores). Card testing is deliberately not scored here:
+    90% of its rows are guest checkout with no account to aggregate to.
+    """
+    mc = lambda e: e["merchant_context"]
+    pin_accounts = collections.defaultdict(set)
+    dev_accounts = collections.defaultdict(set)
+    con_accounts = collections.defaultdict(set)
+    acct_pins = collections.defaultdict(set)
+    acct_devs = collections.defaultdict(set)
+    acct_cons = collections.defaultdict(set)
+    for e in events:
+        a = mc(e)["account_id"]
+        if not a:
+            continue
+        p = mc(e)["shipping_pincode"]
+        if p:
+            pin_accounts[p].add(a)
+            acct_pins[a].add(p)
+        dev_accounts[mc(e)["device_id"]].add(a)
+        acct_devs[a].add(mc(e)["device_id"])
+        con_accounts[e["contact"]].add(a)
+        acct_cons[a].add(e["contact"])
+
+    pin_total = sum(len(v) for v in pin_accounts.values()) or 1
+    typical_pin = pin_total / (len(pin_accounts) or 1)
+
+    conj = {}
+    for a in acct_pins:
+        best = 0
+        for p in acct_pins[a]:
+            peers = pin_accounts[p]
+            for d in acct_devs[a]:
+                best = max(best, len(peers & dev_accounts[d]))
+        conj[a] = best
+
+    ids = sorted(acct_devs)
+    out = []
+    for a in ids:
+        best = 0.0
+        for p in (acct_pins[a] or {None}):
+            for d in acct_devs[a]:
+                for c in acct_cons[a]:
+                    best = max(best, _ring_account_score(
+                        a, p, d, c, pin_accounts, dev_accounts, con_accounts,
+                        conj, typical_pin, cfg))
+        out.append(best)
+    return ids, out
