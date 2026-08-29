@@ -24,6 +24,22 @@ from tests.fixtures import load_events, load_manifest, labels_by_id
 
 SPLIT = 0.70
 
+# The shipped ring score. `raw` is component_size x density, k^2 / n_p.
+#
+# Reverted to on 2026-08-30 after the scale-invariance attempt was measured and
+# lost. Density bought about a quarter of the drift and cost PR AUC 0.5811 to
+# 0.2047, and the diagnosis behind it was wrong: the operating point does not
+# fail because of scale. Per ring, n_p is stable across window lengths (r00
+# 7/8/8, r02 10/10/11) and so is k. It fails because r01, at density 0.5714,
+# sets the train cut and is absent from the test window, so with three rings the
+# between-ring variation dominates. See docs/report/decisions.md, 2026-08-30.
+#
+# The alternative modes stay in src/detector/ring.py and in the stability table
+# below, because the evidence for this decision has to stay reproducible. They
+# are deliberately NOT swept: re-opening a closed decision every run invites a
+# tie-break to silently flip it.
+RING_SCORE_MODE = "raw"
+
 
 def patch_households(events):
     """Counterfactual: give every shared-device account group a common pincode.
@@ -274,7 +290,7 @@ def run(events, manifest, lab, tag, note):
 
     # -------------------------------------------------------------- tune
     grid = []
-    for sm in SCORE_MODES:
+    for sm in (RING_SCORE_MODE,):
         for mc in (2, 3):
             for ow in (0.0, 0.15, 0.35, 0.60, 1.0):
                 for cw in (0.0,):
@@ -285,20 +301,23 @@ def run(events, manifest, lab, tag, note):
                         s = score_accounts(tr, **p)
                         thr, f1 = best_cut(s, pos_tr, uni_tr)
                         grid.append((f1, p, thr))
-    # Selection, in two stages, both on TRAIN.
+    # Selection, in three stages, all on TRAIN.
     #   1. train F1, which measures discrimination inside one window
-    #   2. among everything tied at the top of that, train-side TRANSFER, which
-    #      is the property this fix exists to buy
-    # Stage 2 is necessary rather than decorative: the scale-free modes are
-    # monotone transforms of each other within a window, so stage 1 cannot tell
-    # them apart and an arbitrary tie-break decides otherwise.
+    #   2. among everything tied at the top, train-side TRANSFER
+    #   3. still tied, prefer the LARGER min_pin_population
+    # Stage 3 is a prior, not a measurement: the gate encodes "a drop address
+    # serves more people than a household contains", so where the data cannot
+    # separate two gates the stricter one is the more defensible claim. It is
+    # fixed here rather than left to dict ordering so that the choice is stated
+    # instead of falling out of an arbitrary tie-break, which is how the worst
+    # scoring mode got selected on the previous pass.
     top = max(f1 for f1, _, _ in grid)
     tied = [g for g in grid if g[0] >= top - 1e-9]
     scored = []
     for f1, p, thr in tied:
         mean_f1, fired, n = train_transfer(tr, lab, p, thr)
         scored.append((mean_f1, fired, f1, p, thr))
-    scored.sort(key=lambda t: (-t[0], -t[1]))
+    scored.sort(key=lambda t: (-t[0], -t[1], -t[3]["min_pin_population"]))
     print(f"\n  train F1 ties at {top:.4f} across {len(tied)} configurations, "
           f"so the tie is broken on TRAIN-SIDE TRANSFER:")
     print(f"    {'mode':>9} {'min_pop':>8} {'sub-window F1':>14} {'fired':>7}")

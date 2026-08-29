@@ -145,9 +145,13 @@ SCORE_MODES = ("raw", "density", "lift", "bg", "q95", "rank")
 def _pin_weight(mode, k, population, p_pair):
     """Evidence attaching to one pincode, in the chosen units.
 
-    raw      k^2 / n. The original. NOT scale invariant: k and n both grow with
-             the observation window, so this grows with it too. Kept only so the
-             comparison has the old behaviour in it.
+    raw      k^2 / n. **THE SHIPPED SCORE.** Rewards a large device-linked core
+             while penalising it for being the whole pincode, which is what
+             separates a drop address from both a household and a busy
+             commercial postcode. Its magnitude does drift with window length,
+             1.125 to 2.286 across test windows of 10 to 50%, and the three
+             alternatives below were built to remove that drift. All of them
+             cost more than the drift was worth. See the note at the end.
 
     density  k / n. The share of a pincode's accounts that are device linked.
              Dimensionless and exactly invariant, because k and n scale together.
@@ -175,14 +179,28 @@ def _pin_weight(mode, k, population, p_pair):
     (k, n, p_pair) can cancel it. Measured across test windows of 10/20/30/50%:
     raw drifts 1.125 -> 2.286, density 0.375 -> 0.571, lift 2.0e4 -> 3.4e3.
 
-    What does cancel it is a background that accumulates at the same rate as the
-    signal, which is the window's own population of clusters. `bg` divides by the
-    median candidate weight in the same window, so it reads "this cluster is N
-    times the typical cluster this window produces". That is the sentence the
-    score was always trying to express, and because it is a single constant per
-    window it is a pure rescale: the RANKING within a window is untouched, so
-    PR AUC is identical to raw and the fix costs nothing in discrimination. What
-    it buys is a threshold that means the same thing on any window.
+    The empirical background forms, `bg` and `q95`, divide by the median or the
+    95th percentile candidate weight in the same window, so they read "N times
+    the typical / tail cluster this window produces". Being one constant per
+    window they are pure rescales, leaving the ranking and PR AUC identical to
+    raw, and buying only a change in what the threshold means.
+
+    HOW THIS RESOLVED, 2026-08-30. All four alternatives were measured and all
+    four were rejected. `density` was selected on train and cost PR AUC 0.5811
+    to 0.2047, because dropping the k^2 term lets a three-person household on a
+    six-account pincode tie a real ring. `lift` drifted worse than raw and in the
+    opposite direction. `bg` and `q95` transferred badly on train sub-windows.
+
+    More importantly the premise was wrong. The operating point does NOT fail
+    because of scale. Measured per ring, the pincode population is stable across
+    window lengths (r00 7/8/8, r02 10/10/11) and so is k. What breaks the
+    threshold is that r01 sets the train cut and is absent from the test window,
+    having been caught before the split, leaving two rings at 0.25 and 0.40. With
+    three rings, between-ring variation dominates window length, and that is a
+    sample-size problem no reshaping of this formula can fix.
+
+    The alternatives are kept because the evidence for that decision has to stay
+    reproducible, not because any of them is a candidate. `raw` ships.
     """
     if population < 2:
         return 0.0
