@@ -24,7 +24,7 @@ from sklearn.metrics import roc_auc_score
 N_PERM = 50
 
 
-def medians(path, seeds):
+def medians(path, seeds, n_perm=None):
     events = load_events(path)
     lab = labels_by_id(path)
     y = np.array([lab[e["id"]]["label"] for e in events], dtype=np.int8)
@@ -39,12 +39,13 @@ def medians(path, seeds):
         cats.append(bool(c))
     X = np.hstack(Xs)
 
+    n_perm = n_perm or N_PERM
     out = []
     for s in seeds:
         rng = np.random.default_rng(s)
         aucs = []
         ytr = y[:cut].copy()
-        for i in range(N_PERM):
+        for i in range(n_perm):
             sh = ytr.copy()
             rng.shuffle(sh)
             m = HistGradientBoostingClassifier(max_iter=100, random_state=i,
@@ -60,14 +61,15 @@ def medians(path, seeds):
     return out
 
 
-def main(path, seeds=(0, 1, 2, 3, 4)):
+def main(path, seeds=(0, 1, 2, 3, 4), n_perm=None):
+    n_perm = n_perm or N_PERM
     print("=" * 74)
-    print(f"T2 RESOLUTION CHECK   data={path}   {N_PERM} permutations per seed")
+    print(f"T2 RESOLUTION CHECK   data={path}   {n_perm} permutations per seed")
     print("=" * 74)
     print("  T2 asks whether the empirical-null median is within 0.03 of 0.50.")
     print("  Only the permutation seed changes below. The data is identical.")
     print()
-    out = medians(path, seeds)
+    out = medians(path, seeds, n_perm)
     meds = [m for _, m, _, _ in out]
     spread = max(meds) - min(meds)
     print()
@@ -81,4 +83,7 @@ def main(path, seeds=(0, 1, 2, 3, 4)):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "data/evasive/v050")
+    _path = sys.argv[1] if len(sys.argv) > 1 else "data/evasive/v050"
+    _n = int(sys.argv[2]) if len(sys.argv) > 2 else None
+    _seeds = tuple(int(x) for x in sys.argv[3].split(",")) if len(sys.argv) > 3 else (0, 1, 2, 3, 4)
+    main(_path, _seeds, _n)

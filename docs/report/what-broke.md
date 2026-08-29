@@ -130,3 +130,13 @@ Recorded in api-probe.md (private working doc) §4. Consequence tracked in the p
 - **What pointed at it:** the gap between declared and observed widened monotonically with grade, +0.01, +1.34, +2.60, +4.51, +5.75, +5.58 pp. A constant additive term is exactly what a gap that grows as the base shrinks looks like.
 - **How we fixed it:** the spec is corrected, and the sweep prints declared and observed side by side with the cause named, so the two are never read as the same quantity. The generator is **unchanged**: the floor is a property of the attack, not a limit of the fixture. An operator cannot buy their way below the rate at which their own IINs get blocked, and pretending otherwise to hit a rounder number would be exactly the tuning we do not do.
 - **The part worth remembering:** a number derived correctly from a mechanism is still only a claim about that mechanism. This one was written into the spec as a claim about the *data* before any data existed to check it against.
+
+---
+
+### 2026-08-29 — The combined baseline is more fragile than either of its parts
+
+- **What broke:** baseline 3, "combined volume and decline", was built to be the strongest baseline, the one a competent payments team would actually deploy. Under evasion it became the **worst** of the four. At `v=1.00` its PR AUC is **0.1464**, below the decline baseline's 0.2887 and far below volume's 0.9281, even though volume alone was completely unaffected.
+- **What we thought was wrong:** a scoring bug, since a detector combining two signals should not score below the worse of the two.
+- **What was actually wrong:** nothing was wrong with the code. `score_combined` is `min(volume / vol_ref, decline / dec_ref)`, chosen so a burst has to be **both** busy and failing. That conjunction is exactly the fragility. When the attacker defeats one component, the `min` follows it down and discards the component that still works. A conjunctive detector is only as strong as the signal its attacker chooses to defeat, and the healthy volume signal it still had access to was thrown away.
+- **What pointed at it:** the collapse is later than the decline baseline's but sharper. Combined holds 0.9161 at `v=0.75` where decline is already at 0.6763, then falls to 0.7775 and 0.1464. It inherits its component's failure with a lag, not an immunity.
+- **The part worth remembering:** "require both signals" reads as conservative and is the opposite under adversarial pressure. Requiring both means an attacker only has to break one. Nothing was changed in response: the baseline is a faithful implementation of a rule teams really deploy, and its fragility is a finding about that rule rather than a defect in our copy of it.

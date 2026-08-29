@@ -29,6 +29,24 @@ from tests.acceptance.mechanisms import MECHANISMS, TOLERANCE, predicted
 SPLIT = 0.70          # chronological, same protocol across every test that splits
 RESULTS = []
 
+# T2 permutation count. Raised from 50 to 350 on 2026-08-29 because the
+# empirical-null median moved 0.0782 across permutation seeds on identical data,
+# against a 0.03 threshold, so the test could not resolve what it was asked to
+# test. 350 came from assuming sqrt(n) convergence: (0.0782/0.03)^2 ~ 6.8x.
+#
+# MEASURED 2026-08-30, and the assumption did not hold. At 350 the seed-to-seed
+# spread is 0.0489, not the ~0.030 sqrt(n) predicts. Seven times the permutations
+# bought a factor of 1.6, not 2.65, because the permutation AUCs are heavy-tailed
+# (95% band spans roughly 0.19 to 0.85) and the median converges far slower than
+# the normal approximation assumes. T2 still fails 4 of 6 grades, on both sides
+# of 0.50, and those failures are noise rather than a property of the data.
+#
+# 350 is kept because it IS strictly better than 50 and it is what was asked for.
+# It is NOT enough, extrapolating a second time would repeat the same mistake,
+# and the threshold is deliberately left alone: loosening a test we failed is not
+# a call to make inside a test run. See docs/report/numbers.md, 2026-08-30.
+T2_PERMUTATIONS = 350
+
 
 def record(name, ok, detail):
     RESULTS.append((name, ok, detail))
@@ -176,7 +194,7 @@ def t2(rows, y, cut, rng):
     catmask = [c for c in cats]
     aucs = []
     ytr = y[:cut].copy()
-    for i in range(50):
+    for i in range(T2_PERMUTATIONS):
         sh = ytr.copy()
         rng.shuffle(sh)
         m = HistGradientBoostingClassifier(max_iter=100, random_state=i,
@@ -190,7 +208,7 @@ def t2(rows, y, cut, rng):
     lo, hi = float(np.percentile(aucs, 2.5)), float(np.percentile(aucs, 97.5))
     ok = (lo <= 0.50 <= hi) and abs(med - 0.50) <= 0.03
     record("T2 label shuffle", ok,
-           f"empirical null over 50 permutations: median {med:.4f} "
+           f"empirical null over {T2_PERMUTATIONS} permutations: median {med:.4f} "
            f"(within 0.03 of 0.50), 95% [{lo:.4f},{hi:.4f}] must contain 0.50")
     return med, lo, hi
 

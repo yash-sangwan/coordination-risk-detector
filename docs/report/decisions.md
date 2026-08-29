@@ -141,3 +141,13 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 - **Why not longer spans:** at campaign scale it is pacing again, and it fights the economics, since stolen card data has a short shelf life. Marked ASSUMPTION: the direction is standard but we have no primary source for a decay rate, so no number is claimed.
 - **What is held fixed, and checked rather than asserted:** across the five evasive steps the largest spread on **any** coordination measure is **0.0000 pp**, against 77.41 pp of movement on the decline rate. In evasive mode the decline reason is drawn on every attempt rather than only on failures, so all five steps share one RNG sequence and carry byte-identical identities, devices, amounts and timestamps.
 - **The control is the existing data:** `v=0.00` is **byte-identical** to `data/sample` (events, sealed and manifest all hash the same), so every number measured before this commit applies to it unchanged.
+
+---
+
+### 2026-08-29 — The graph detector earns its place, on the curve rather than at a point
+
+- **Chose:** Keep the graph detector, and state its case as a **robustness** result rather than a headline-accuracy one.
+- **Rejected:** The conclusion drawn one commit earlier, that the graph adds nothing over the decline rate. That was true at `v=0.00` and it does not generalise, which is exactly what the evasive sweep was built to find out.
+- **Why:** With every threshold frozen on `v=0.00` train and applied unchanged across all six grades, the decline baseline goes from 0.9583 PR AUC to **0.2887**, misses both test bursts entirely from `v=0.75` onward, and its recall reaches exactly **0.0000**. The graph sits at **0.9451 at every single evasive grade**, misses nothing, and holds recall at 0.9921 and precision at 0.9363 throughout. The crossover is between `v=0.00` and `v=0.25`.
+- **The evidence is stronger than the metric:** the graph's **score vectors are bit-identical** across all five evasive grades, `max |diff| = 0.00e+00`. That is proof rather than inference that it reads nothing decline-linked. It was the one thing that could have invalidated the result and it did not.
+- **The honest caveat, which stands:** the **volume baseline also holds flat** at 0.9281 PR AUC and misses no burst at any grade. Pacing was deliberately not swept, so this curve does not show the graph beating a well-tuned volume rule by much; it shows the graph beating the *decline* rule by a lot. The graph is ahead of volume everywhere (0.9451 against 0.9281) and detects far earlier, 6 to 8 attempts against 63 to 66, but a claim that only the graph survives evasion would be false and we are not making it.
