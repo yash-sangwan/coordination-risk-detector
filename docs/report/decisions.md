@@ -199,3 +199,33 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 **Observation, not a result: `rank`.** The quantile-position form fires on test at **precision 1.0000 and recall 0.5556**, the only variant whose frozen cut fires at all. It is **not selectable**: its train F1 is 0.5714 against the 0.8095 tie, so it never reaches the tie-break on the split we are allowed to choose on. We know it looks good on test only because the stability table was in front of us while iterating candidates, so choosing it now would be selection on test and the number would not mean what it appears to mean. Recorded here so the temptation is visible rather than acted on, and so that anyone with more rings knows where to look first.
 
 **One process change kept from the attempt.** Train F1 cannot distinguish `raw`, `bg`, `q95` and `rank`, because they are monotone transforms of each other inside a window and therefore produce identical rankings. Ties are now broken explicitly, on train-side transfer and then on the larger `min_pin_population`, the latter being a stated prior that a drop address serves more people than a household contains. Previously an arbitrary tie-break decided, which is how the worst-transferring mode came to be selected on the first pass.
+
+---
+
+### 2026-08-30 — Decision layer: three reversible tiers, boundaries solved from cost
+
+- **Chose:** `MONITOR`, `STEP_UP`, `HOLD_REVIEW`. **`DECLINE` is not implemented**, so no irreversible action exists in the codebase rather than merely being discouraged. Every alert produces an `AlertRecord` and there is no code path that acts without one.
+- **Why no decline:** the cited asymmetry. **"For every Rs 100 saved by preventing fraud, brands lose Rs 400-600 to falsely declined legitimate orders"** ([Razorpay](https://razorpay.com/blog/payment-success-rate-optimization-india/), verified 2026-08-28, spec section 3). At a 4-6x penalty an outright block is a bad trade at any precision we can reach, and deleting it from the action set is more reliable than trying to threshold it safely.
+- **How the tier boundaries are set:** solved, not chosen. Expected cost of an action at fraud probability `p` is `p*cost_on_attack + (1-p)*cost_on_legitimate`, a straight line in `p` per action, so the boundaries are where the lines cross. `tier_boundaries()` scans for the crossings. They move with the cost parameters and with the order value: on a Rs 16.89 order `HOLD_REVIEW` is **never** optimal, because a Rs 120 review costs more than the exposure, and the record says so rather than hiding it.
+- **The cited check FAILED, and it is recorded as a failure.** Built bottom up, the model implies **1.54x**, not 4-6x. The cause is structural: it prices the immediate order only, while the citation is the full economic cost of a false decline, dominated by the customer not returning. Solving the other way, the citation implies a false decline costs **2.6x to 3.9x** one order's margin, so 1.6 to 2.9 further orders of lost repeat business. That figure is **derived from the citation, not fitted to it**, and is not an input anywhere.
+- **Why we did not add a churn parameter to close the gap:** choosing a churn multiple and then checking it against the citation would be fitting the model to its own test. The single-order model is a **lower bound** on false-positive cost, so every operating point it selects is if anything more aggressive than the citation justifies. Understating over-blocking is the safe direction to be wrong in, and it barely bites here because nothing declines.
+
+---
+
+### 2026-08-30 — Money-optimal operating points, and what freezing one costs
+
+- **Chose:** report the money-optimal operating point beside the F1-optimal one for every detector, and keep both. No detector was retuned; only the operating point is chosen twice.
+- **They do not coincide.** F1 is consistently too conservative, most severely for the volume baseline where the money-optimal threshold is less than half the F1 one, worth **Rs 27,644, or 27.18%**, on a single test split. For the other three the gap is 1.4% to 1.7%, so F1 is a decent proxy there and a poor one for volume.
+- **The money-optimal threshold moves as the attacker evades, and it has to.** The mechanism is measured, not assumed: an evasive attacker works a better card list, so the share of attack attempts that authorise rises from **12.01% to 89.42%** across the sweep. Each missed attempt therefore costs far more, and the optimal threshold falls.
+- **The price of not adapting**, a threshold frozen at the v=0.00 money optimum against one recomputed per grade, worst grade:
+
+| detector | worst excess | as % |
+|---|---|---|
+| GRAPH fanout vs overlap | Rs 2,548 | **0.79%** |
+| baseline 1 rolling volume | Rs 40,696 | 10.51% |
+| baseline 3 combined | Rs 2,123,214 | 331.94% |
+| baseline 2 rolling decline | Rs 2,032,544 | **433.24%** |
+
+- **The graph detector is the only one whose threshold is worth freezing.** Its scores are bit-identical across the evasive grades, so its money-optimal cut barely moves and a frozen one costs under 1% at every grade. The decline baseline's cut is worth 433% of the achievable cost by the time the attacker is working a clean list. That is the earlier bit-identical-scores result restated as money, and it is the strongest form of the argument for the graph detector we have: not that it scores higher, but that **it is the only one you can set and leave**.
+- **Total cost still rises for everyone** as the attack evades, because each miss costs more. At v=1.00 the graph runs at Rs 324,970 against the decline baseline's Rs 2,763,090, an 8.5x difference in money on the same data.
+

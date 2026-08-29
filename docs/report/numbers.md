@@ -274,3 +274,88 @@ The pass condition is now the single standard permutation criterion: 0.50 inside
 | v100 | [0.1965, 0.8485] | PASS | 0.5394 | FAIL |
 
 **6 of 6 pass**, against 2 of 6 before. The four recovered cells were seed noise: at 350 permutations the median moves 0.0489 across seeds on identical data, which is larger than the 0.03 it was being compared against, and failures fell on both sides of 0.50 at both permutation counts.
+
+---
+
+### 2026-08-30 — Cost model and money-optimal operating points
+
+**Command.** `python -m tests.decision.evaluate_cost data/evasive`
+
+**Every parameter, tagged.** CITED = published and verified; MEASURED = computed from our stream; ASSUMPTION = ours, with the reasoning.
+
+| parameter | value | tag | basis |
+|---|---|---|---|
+| `cited_decline_ratio_lo/hi` | 4.0 / 6.0 | **CITED** | Rs 400-600 lost per Rs 100 saved, [Razorpay](https://razorpay.com/blog/payment-success-rate-optimization-india/), verified 2026-08-28 |
+| VAMP enumeration threshold | 300,000/mo at 20% | **CITED** | Chargebacks911, spec 2.1 (motivates the per-attempt term; the fine schedule is not public) |
+| `p_authorize` | 12.01% to 89.42% | **MEASURED** | share of attack attempts that authorise, per dataset |
+| order amounts | per event | **MEASURED** | taken from the generated stream, never invented |
+| `chargeback_fee` | Rs 1,500 | ASSUMPTION | order of magnitude across Indian PSP pricing; no Razorpay figure we could verify |
+| `enumeration_cost_per_attempt` | Rs 2 | ASSUMPTION | scheme exposure per attempt; VAMP sets the threshold but not a public fine schedule |
+| `gross_margin` | 0.30 | ASSUMPTION | mid-range Indian D2C retail |
+| `review_cost` | Rs 120 | ASSUMPTION | derived: Rs 9,00,000/yr fully loaded over ~1,800 h = Rs 500/h, 15 min per review |
+| `stepup_abandon_rate` | 0.08 | ASSUMPTION | friction is real but the customer can complete it |
+| `hold_abandon_rate` | 0.04 | ASSUMPTION | lower; checkout is already done and the delay is back office |
+| `stepup_effectiveness` | 0.85 | ASSUMPTION | a card tester holds PAN and CVV, usually not the OTP |
+| `hold_effectiveness` | 0.97 | ASSUMPTION | a person looks at it; not 1.0, reviewers release bad orders |
+
+**Citation check: FAILED, recorded as such.** Mean legitimate order Rs 1,106.48, mean attack attempt Rs 273.35, authorise rate 12.01%, all MEASURED. Implied ratio **1.54x** against a cited **4x to 6x**. The model prices the immediate order only; the citation includes the customer not returning. Inverting it, the citation implies a false decline costs **2.6x to 3.9x** one order's margin. Derived from the citation, not fitted to it, and not used as an input.
+
+**Money-optimal against F1-optimal, v=0.00 test split, scored once.**
+
+| detector | F1 thr | money thr | F1 cost | money cost | gap |
+|---|---|---|---|---|---|
+| baseline 1 rolling volume | 24.3333 | 11.6667 | Rs 101,717 | Rs 74,072 | **Rs 27,644 (27.18%)** |
+| baseline 2 rolling decline | 0.6250 | 0.5000 | Rs 62,191 | Rs 61,302 | Rs 889 (1.43%) |
+| baseline 3 combined | 0.3288 | 0.2667 | Rs 66,978 | Rs 65,844 | Rs 1,134 (1.69%) |
+| GRAPH fanout vs overlap | 0.4741 | 0.3874 | Rs 62,844 | Rs 61,925 | Rs 919 (1.46%) |
+
+They do **not** coincide for any detector. F1 is too conservative throughout, badly so for volume.
+
+**The price of not adapting.** Threshold frozen at the v=0.00 money optimum, against one recomputed per grade. Excess cost in rupees:
+
+| grade | p_auth | volume | decline | combined | GRAPH |
+|---|---|---|---|---|---|
+| 0.00 | 12.01% | 0 | 0 | 0 | 0 |
+| 0.25 | 31.41% | 11,382 | 54,918 | 1,113 | 920 |
+| 0.50 | 50.90% | 23,500 | 1,021,363 | 977 | 1,256 |
+| 0.75 | 69.74% | 32,319 | 1,751,607 | 46,502 | 1,705 |
+| 0.90 | 80.95% | 36,213 | **2,032,544** | 1,633,382 | 2,186 |
+| 1.00 | 89.42% | 40,696 | 1,915,447 | **2,123,214** | **2,548** |
+
+Worst-case excess as a share of achievable cost: GRAPH **0.79%**, volume 10.51%, combined 331.94%, decline **433.24%**. The graph is the only detector whose threshold is worth freezing, which is the bit-identical-scores result restated as money.
+
+---
+
+### 2026-08-30 — Worked alert record
+
+One alert, end to end. The graph detector on a card-testing attempt in the v=0.00 test split, at its money-optimal threshold. This is the audit trail: what was decided, what triggered it, the score and boundary crossed, and the cost of being wrong in each direction.
+
+```
+ALERT  pay_0000000DQkloie   t=1786258209
+  action        STEP_UP   (reversible: True)
+  why           expected fraud loss exceeds step-up friction, but not the cost of occupying a reviewer
+  detector      GRAPH: fanout vs overlap
+  score         0.4375  against threshold 0.3874
+  p(fraud)      0.9647   calibrated on the train split
+  order value   Rs 16.89
+  evidence
+      window                 180s trailing
+      attempts in window     8
+      IIN concentration      0.3438 over 4 distinct
+      device concentration   0.1562 over 7 distinct
+      identity fanout        0.8750 over 8 emails
+      shipping pincode       null
+      account_id             null (guest)
+      checkout_ms            172
+  tier boundaries, solved from the cost model, not chosen
+                STEP_UP at p>=0.0026, HOLD_REVIEW never optimal
+  expected cost of each available action
+                STEP_UP Rs 26.66, HOLD_REVIEW Rs 125.34, MONITOR Rs 177.66
+  cost of being wrong
+      if this customer was legitimate      Rs 0.41
+      if this was fraud and we only watched Rs 177.66
+  no irreversible action is available to this system; DECLINE is not implemented
+
+  The same record as data, for the audit log:
+    {"action": "STEP_UP", "amount_paise": 1689, "event_id": "pay_0000000DQkloie", "expected_costs": {"HOLD_REVIEW": 125.34, "MONITOR": 177.66, "STEP_UP": 26.66}, "p_fraud": 0.964747, "rationale": "expected fraud loss exceeds step-up friction, but not the cost of occupying a reviewer", "reversible": true, "score": 0.4375, "threshold": 0.387428}
+```
