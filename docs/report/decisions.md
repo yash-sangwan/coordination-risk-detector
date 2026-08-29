@@ -128,3 +128,16 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 - **How it ships:** as a measured limitation with the ceiling and its cause stated, not as a solved problem. Anyone reading the numbers sees 0.44, why it is 0.44, and what would have to change.
 
 **Second limitation, recorded alongside it.** Attack contacts are **100% unique** in the generated stream, which is optimistic. Real carding bots recycle number pools, so `contact` is more separable here than it would be against a real attacker. The same is true to a lesser degree of any field where we assume a fresh identity per attempt.
+
+---
+
+### 2026-08-29 — Evasive card testing models list grade, not pacing
+
+- **Chose:** One swept lever, the **grade of the card list** being run: the fraction of its numbers already known live. It sets the decline rate and touches nothing else.
+- **Rejected:** Pacing and long-span spreading as sweep axes, and the "small pool of known-good cards, re-used" reading of the same mechanism.
+- **Why list grade:** it is the only one of the three candidate mechanisms that actually moves the *decline rate*. Pacing and spreading move events per minute. Card lists are sold graded by liveness, and the schemes score merchants on the enumeration **ratio** rather than the count (Visa VAMP, 20%+ ratio, cited in spec 2.1), so a ratio threshold is a standing published incentive to hold an observed decline rate down. Working a better list is the obvious response to it.
+- **Why not a re-used good-card pool:** a small pool repeats, which creates overlap on `card.last4` and changes the coordination structure the fixture is required to hold fixed. List grade has no such side effect: same IIN, fresh PAN, fresh identity, same few devices, every attempt.
+- **Why pacing is implemented but not swept:** two reasons. Measurement, because folding volume into a decline-rate axis confounds the curve. And restraint: pacing tuned until the volume baseline also failed would engineer a fixture only a graph detector could win. The honest expectation is that **the volume baseline still catches this variant**, and that is the correct outcome rather than a shortfall. `--evasive-rate-scale` is wired up at no-throttle so a pacing sweep is one flag away as its own experiment.
+- **Why not longer spans:** at campaign scale it is pacing again, and it fights the economics, since stolen card data has a short shelf life. Marked ASSUMPTION: the direction is standard but we have no primary source for a decay rate, so no number is claimed.
+- **What is held fixed, and checked rather than asserted:** across the five evasive steps the largest spread on **any** coordination measure is **0.0000 pp**, against 77.41 pp of movement on the decline rate. In evasive mode the decline reason is drawn on every attempt rather than only on failures, so all five steps share one RNG sequence and carry byte-identical identities, devices, amounts and timestamps.
+- **The control is the existing data:** `v=0.00` is **byte-identical** to `data/sample` (events, sealed and manifest all hash the same), so every number measured before this commit applies to it unchanged.

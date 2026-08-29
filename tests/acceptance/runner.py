@@ -447,9 +447,14 @@ def t6(events, lab, manifest):
 
 def t7(path, manifest):
     out = os.path.join(os.path.dirname(path.rstrip("/\\")) or ".", "_t7_rerun")
+    # Every run PARAMETER has to be replayed, or the rerun is a different run.
+    # The spec 2.1e list grade is one of them.
     cmd = [sys.executable, "-m", "src.generator.run",
            "--seed", str(manifest["seed"]), "--days", str(manifest["days"]),
-           "--actors", str(manifest["n_actors"]), "--out", out]
+           "--actors", str(manifest["n_actors"]),
+           "--evasive", str(manifest.get("evasive_valid_share", 0.0)),
+           "--evasive-rate-scale", str(manifest.get("evasive_rate_scale", 1.0)),
+           "--out", out]
     subprocess.run(cmd, check=True, capture_output=True)
     import hashlib
     same = {}
@@ -532,9 +537,14 @@ def main(path):
     print(f"ACCEPTANCE TESTS  spec section 5   data={path}")
     print(f"events {len(events)}  attack {int(y.sum())} ({y.mean()*100:.2f}%)  "
           f"chronological split {SPLIT:.0%} -> train {cut} / test {len(rows)-cut}")
+    vshare = manifest.get("evasive_valid_share", 0.0)
+    print(f"spec 2.1e list grade {vshare:.2f} -> declared attack decline "
+          f"{manifest.get('evasive_expected_decline', C.ATTACK_DECLINE_BASE):.4f}"
+          + ("   (ordinary burst)" if not vshare else "   (EVASIVE VARIANT)"))
     print("=" * 78)
 
-    scale = {"n_actors": manifest["n_actors"], "days": manifest["days"]}
+    scale = {"n_actors": manifest["n_actors"], "days": manifest["days"],
+             "evasive_valid_share": manifest.get("evasive_valid_share", 0.0)}
     t1res = t1(rows, y, cut, scale)
     rng = np.random.default_rng(0)
     t2res = t2(rows, y, cut, rng)

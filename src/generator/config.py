@@ -250,6 +250,70 @@ BURST_ENDINGS = [("exhausted", 0.50), ("blocked", 0.35), ("moves_on", 0.15)]
 BURST_DECAY_MINUTES = (10, 20)         # for the moves_on ending
 
 # --------------------------------------------------------------------------
+# 2.1e Evasive card testing (spec 2.1e)
+# --------------------------------------------------------------------------
+# PURPOSE: this is a DETECTOR ROBUSTNESS TEST. It measures where a decline-rate
+# baseline fails. It is a test fixture, not an attack tool.
+#
+# The evasion modelled here is standard published knowledge about card testing,
+# not anything novel. Stolen card lists are sold graded by how many numbers are
+# still live, and the card schemes score merchants on the RATIO of failed
+# enumeration attempts rather than the count: Visa's VAMP rules flag a merchant
+# above 300,000 enumeration attempts per month at a 20%+ enumeration ratio
+# (spec 2.1, Chargebacks911). A ratio threshold is a published, standing
+# incentive to hold the observed decline rate down, and working a higher grade
+# of list is the obvious way to do it. Nothing here tells an operator anything
+# they do not already know.
+#
+# Track 02 is defence only and this stays on the defensive side of that line.
+# What the module produces is a labelled synthetic stream in our own schema, for
+# scoring our own detectors against. It issues no requests anywhere.
+
+# The swept lever: what fraction of the list being run is already known live.
+# 0.0 reproduces the ordinary burst exactly, including its RNG draw sequence.
+EVASIVE_VALID_LIST_SHARE = 0.0         # default, overridden per run
+
+# A freshly validated card, charged a micro amount, cannot reach every reason in
+# the legitimate DECLINE_REASONS mix. Three of the five are closed to it:
+#   insufficient_funds  a live card is not short of 20 rupees
+#   card_expired        a validated card is not expired
+#   payment_cancelled   a bot does not abandon at the bank page
+# Authentication failure and gateway timeout remain, and those hit anyone.
+EVASIVE_VALID_UNREACHABLE = ("insufficient_funds", "card_expired",
+                             "payment_cancelled")
+
+_valid_keep = [r for r in DECLINE_REASONS if r[0] not in EVASIVE_VALID_UNREACHABLE]
+_valid_w = sum(w for _, w, _, _, _ in _valid_keep)
+
+# Decline rate of the validated slice, DERIVED rather than picked: the cited card
+# rate times the share of the reason mix a live card at a micro amount can still
+# hit. 0.125 * 0.40 = 0.050. This is the floor of the whole sweep, and it sits
+# BELOW the 12.5% ambient card rate because micro amounts on live cards authorise
+# more reliably than the general population of card attempts, which includes
+# large purchases hitting limits.
+EVASIVE_VALID_DECLINE = METHOD_DECLINE["card"] * _valid_w
+
+EVASIVE_VALID_DECLINE_REASONS = [(n, w / _valid_w, c, s, st)
+                                 for n, w, c, s, st in _valid_keep]
+
+
+def evasive_decline(valid_share: float) -> float:
+    """Observed decline rate of a burst run against a list that is `valid_share`
+    pre-validated. Linear because the two slices are independent draws."""
+    v = max(0.0, min(float(valid_share), 1.0))
+    return (1.0 - v) * ATTACK_DECLINE_BASE + v * EVASIVE_VALID_DECLINE
+
+
+# Sweep steps. Chosen to spread the OBSERVED decline rate roughly evenly from the
+# ordinary 88% down to the 5.0% mechanism floor, not to hit any detector target.
+EVASIVE_SWEEP = [0.00, 0.25, 0.50, 0.75, 0.90, 1.00]
+
+# Pacing lever, implemented and deliberately NOT swept. Throttling changes events
+# per minute, not the decline rate, so folding it into the same sweep would
+# confound the axis. See spec 2.1e for why it is a separate experiment.
+EVASIVE_RATE_SCALE = 1.0
+
+# --------------------------------------------------------------------------
 # 2.2 Rings
 # --------------------------------------------------------------------------
 # The inverse of a burst: low fanout, high overlap, weeks rather than minutes.

@@ -1,4 +1,13 @@
-"""Card testing bursts (spec 2.1). No ring, no acceptance tests.
+"""Card testing bursts (spec 2.1) and the evasive variant (spec 2.1e).
+
+The evasive variant is a DETECTOR ROBUSTNESS TEST. It measures where a
+decline-rate baseline fails. It is a test fixture, not an attack tool, and the
+evasion it models is standard published knowledge about card testing rather than
+anything novel: card lists are graded by how many numbers are still live, and
+the schemes score merchants on the enumeration RATIO, which is a standing public
+incentive to keep the observed decline rate down. Track 02 is defence only and
+this stays on the defensive side of that line. See config section 2.1e.
+
 
 The shape that matters is **high fanout, low overlap**: many distinct throwaway
 identities converging on very few instruments and devices. Both halves are
@@ -51,6 +60,7 @@ class Burst:
     device_ids: list    # 1-5 fingerprints
     ending: str
     envelope: float
+    valid_list_share: float = 0.0   # spec 2.1e. 0.0 is the ordinary burst.
 
 
 def _campaign_envelope(frac: float) -> float:
@@ -66,8 +76,19 @@ def _campaign_envelope(frac: float) -> float:
     return max(floor, 1.0 - (1.0 - floor) * tail)
 
 
-def schedule_campaign(rng, window_start: int, window_end: int):
+def schedule_campaign(rng, window_start: int, window_end: int,
+                      valid_list_share: float = 0.0,
+                      rate_scale: float = None):
     """One campaign of recurring bursts across the window.
+
+    `valid_list_share` (spec 2.1e) is the grade of the card list being run: the
+    fraction of its numbers already known live. It changes the decline rate and
+    nothing else. Every coordination parameter below is drawn identically at
+    every level of it, so the sweep is a pure decline-rate axis.
+
+    `rate_scale` is the pacing lever. Implemented, defaulted to no throttling,
+    and deliberately not part of the sweep, because throttling moves events per
+    minute rather than the decline rate.
 
     Burst start times are drawn without reference to the legitimate hourly
     profile: a bot does not care that it is 04:00. Restricting bursts to quiet
@@ -75,6 +96,7 @@ def schedule_campaign(rng, window_start: int, window_end: int):
     frequently overlap real traffic.
     """
     iin_pairs, _ = build_iin_table()
+    rate_scale = C.EVASIVE_RATE_SCALE if rate_scale is None else rate_scale
 
     n_bursts = rng.randint(*C.BURSTS_PER_CAMPAIGN)
     span = window_end - window_start
@@ -102,7 +124,7 @@ def schedule_campaign(rng, window_start: int, window_end: int):
         minutes = rng.randint(*C.BURST_MINUTES)
         # Rate is drawn from the spec band then scaled by the campaign envelope,
         # so early and late bursts are genuinely weaker than the plateau ones.
-        rate = rng.uniform(*C.BURST_RATE_PER_MIN) * env
+        rate = rng.uniform(*C.BURST_RATE_PER_MIN) * env * rate_scale
 
         # Stolen cards are real cards from real issuers, so attack IINs come from
         # the same pool legitimate customers use. A novel IIN would BE the label.
@@ -121,6 +143,7 @@ def schedule_campaign(rng, window_start: int, window_end: int):
             device_ids=devices,
             ending=_weighted(rng, C.BURST_ENDINGS),
             envelope=env,
+            valid_list_share=valid_list_share,
         ))
 
     return bursts
@@ -157,7 +180,16 @@ def burst_attempts(rng, burst: Burst, legit_amount_fn, minter_free=True):
     sorts by created_at, so attack rows never occupy a contiguous block.
     """
     reason_lookup = {r[0]: r for r in C.ATTACK_DECLINE_REASONS}
+    valid_lookup = {r[0]: r for r in C.EVASIVE_VALID_DECLINE_REASONS}
     pin_pairs, _, _ = build_pincode_table()
+
+    # Spec 2.1e. The list grade sets the burst's decline rate and nothing else.
+    v = burst.valid_list_share
+    base_decline = C.evasive_decline(v)
+    # Expected share of ALL attempts that are a validated card declining for an
+    # ordinary reason. Used below to split a failure between the two causes off
+    # the same uniform draw that decided the failure, so no extra draw is spent.
+    p_valid_fail = v * C.EVASIVE_VALID_DECLINE
     # Attack emails are drawn from the SAME weighted domain distribution as
     # legitimate ones. Drawing them uniformly gave attack traffic higher domain
     # entropy than real traffic, which is a tell in the opposite direction: real
@@ -180,12 +212,15 @@ def burst_attempts(rng, burst: Burst, legit_amount_fn, minter_free=True):
 
         # Endings. The three are modelled separately because a detector that only
         # ever sees one of them will overfit to it.
-        decline_p = C.ATTACK_DECLINE_BASE
+        decline_p = base_decline
         if burst.ending == "blocked" and progress > 0.75:
             # Attempts continue briefly at a rising decline rate, then stop.
+            # An issuer block is issuer-side and does not care how good the list
+            # is, so the ramp still ends at ATTACK_DECLINE_BLOCKED however high
+            # the grade: evasion buys nothing once the IIN is blocked.
             ramp = (progress - 0.75) / 0.25
-            decline_p = C.ATTACK_DECLINE_BASE + ramp * (
-                C.ATTACK_DECLINE_BLOCKED - C.ATTACK_DECLINE_BASE)
+            decline_p = base_decline + ramp * (
+                C.ATTACK_DECLINE_BLOCKED - base_decline)
         elif burst.ending == "moves_on" and ts > decay_start:
             # Rate decays: thin the attempts out toward the end.
             keep = 1.0 - (ts - decay_start) / max(burst.end - decay_start, 1)
@@ -219,9 +254,23 @@ def burst_attempts(rng, burst: Burst, legit_amount_fn, minter_free=True):
             wants_account=wants_account,
         )
 
-        failed = rng.random() < decline_p
+        u = rng.random()
+        failed = u < decline_p
         reason = None
-        if failed:
+        if v > 0.0:
+            # Evasive mode draws the reason on EVERY attempt, failed or not, so
+            # the RNG sequence is identical at every grade of list. That makes
+            # each sweep step carry byte-identical identities, devices, amounts
+            # and timestamps, and differ only in status and error_*, which is
+            # what makes the sweep a clean single-variable axis. At v == 0 the
+            # draw is skipped and the original stream is reproduced exactly.
+            name = _weighted(rng, [(r[0], r[1]) for r in
+                                   (C.EVASIVE_VALID_DECLINE_REASONS
+                                    if u < p_valid_fail else C.ATTACK_DECLINE_REASONS)])
+            if failed:
+                r = (valid_lookup if u < p_valid_fail else reason_lookup)[name]
+                reason = (r[0], r[2], r[3], r[4])
+        elif failed:
             name, _ = _attack_decline_reason(rng)
             r = reason_lookup[name]
             reason = (r[0], r[2], r[3], r[4])

@@ -27,7 +27,8 @@ WALLETS = ["paytm", "phonepe", "amazonpay", "mobikwik", "freecharge"]
 DEFAULT_WINDOW_END = 1787000000
 
 
-def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True):
+def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True,
+             evasive_valid_share: float = 0.0, evasive_rate_scale: float = None):
     master = random.Random(seed)
     rng_pop = random.Random(master.getrandbits(64))
     rng_cal = random.Random(master.getrandbits(64))
@@ -88,7 +89,9 @@ def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True):
     # so they interleave by created_at and never occupy a contiguous block.
     bursts = []
     if with_attacks:
-        bursts = schedule_campaign(rng_atk, window_start, window_end)
+        bursts = schedule_campaign(rng_atk, window_start, window_end,
+                                   valid_list_share=evasive_valid_share,
+                                   rate_scale=evasive_rate_scale)
         for b in bursts:
             for ts_a, ident, a in burst_attempts(rng_atk, b, draw_amount):
                 # session_id is new per attempt: card testing does not browse.
@@ -160,6 +163,12 @@ def generate(seed: int, days: int, n_actors: int, with_attacks: bool = True):
              "ending": b.ending, "envelope": round(b.envelope, 3)}
             for b in bursts
         ],
+        # Spec 2.1e. Detector robustness fixture: the grade of card list the
+        # bursts are run against, which sets their decline rate and nothing else.
+        "evasive_valid_share": evasive_valid_share,
+        "evasive_rate_scale": (C.EVASIVE_RATE_SCALE if evasive_rate_scale is None
+                               else evasive_rate_scale),
+        "evasive_expected_decline": round(C.evasive_decline(evasive_valid_share), 4),
         "cut_fields_not_generated": CUT_FIELDS,
         "flash_sales": flash_sales,
         "downtimes": downtimes,
@@ -175,9 +184,16 @@ def main():
     ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--actors", type=int, default=4000)
     ap.add_argument("--out", default="data/sample")
+    ap.add_argument("--evasive", type=float, default=0.0,
+                    help="spec 2.1e: fraction of the card list already known "
+                         "live. 0.0 reproduces the ordinary burst exactly.")
+    ap.add_argument("--evasive-rate-scale", type=float, default=None,
+                    help="spec 2.1e pacing lever. Not part of the sweep.")
     args = ap.parse_args()
 
-    rows, sealed, manifest = generate(args.seed, args.days, args.actors)
+    rows, sealed, manifest = generate(args.seed, args.days, args.actors,
+                                      evasive_valid_share=args.evasive,
+                                      evasive_rate_scale=args.evasive_rate_scale)
 
     os.makedirs(args.out, exist_ok=True)
     write_stream(os.path.join(args.out, "events.jsonl"), rows)

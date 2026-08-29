@@ -63,6 +63,20 @@ def _binary_auc(p_attack, p_benign):
     return 0.5 * (1.0 + abs(p_attack - p_benign))
 
 
+def _valid_share(scale):
+    """Grade of card list this run declared (spec 2.1e), from the run PARAMETER.
+
+    Read from the manifest's declared setting, never from the observed decline
+    rate, so the prediction stays non-circular. On an ordinary run it is 0.0 and
+    every formula below reduces to the original.
+    """
+    return float((scale or DEFAULT_SCALE).get("evasive_valid_share", 0.0) or 0.0)
+
+
+def _attack_decline(scale):
+    return C.evasive_decline(_valid_share(scale))
+
+
 def _cat_auc(attack_dist, benign_dist, rng, n=N_MC):
     """AUC a categorical field can reach given its declared class distributions.
 
@@ -92,23 +106,34 @@ def _cat_auc(attack_dist, benign_dist, rng, n=N_MC):
 
 def _pred_status(rng, scale=None):
     b = _benign_decline_rate()
-    return _cat_auc({"failed": C.ATTACK_DECLINE_BASE, "ok": 1 - C.ATTACK_DECLINE_BASE},
-                    {"failed": b, "ok": 1 - b}, rng)
+    a = _attack_decline(scale)
+    return _cat_auc({"failed": a, "ok": 1 - a}, {"failed": b, "ok": 1 - b}, rng)
 
 
-def _error_dists(key):
+def _error_dists(key, scale=None):
     """Declared distribution over an error field, including the null case.
 
     error_* is non-null exactly when the attempt failed, so the null category
     carries the decline-rate signal and the populated categories carry the
     reason-mix concentration on top of it.
+
+    Under spec 2.1e the attack's failures split between two declared tables: the
+    CVV/expiry-class reasons of an unchecked card, and the ordinary live-card
+    reasons a validated one can still hit. Both the split and the total come from
+    the declared list grade, so the prediction tracks the variant instead of
+    being trivially generous to it.
     """
     b = _benign_decline_rate()
-    a = C.ATTACK_DECLINE_BASE
+    v = _valid_share(scale)
+    a = _attack_decline(scale)
+    a_valid = v * C.EVASIVE_VALID_DECLINE       # failures from the checked slice
+    a_raw = a - a_valid                          # failures from the unchecked one
     ad, bd = {None: 1 - a}, {None: 1 - b}
-    for name, w, code, source, step in C.ATTACK_DECLINE_REASONS:
-        k = {"reason": name, "code": code, "source": source, "step": step}[key]
-        ad[k] = ad.get(k, 0.0) + a * w
+    for table, mass in ((C.ATTACK_DECLINE_REASONS, a_raw),
+                        (C.EVASIVE_VALID_DECLINE_REASONS, a_valid)):
+        for name, w, code, source, step in table:
+            k = {"reason": name, "code": code, "source": source, "step": step}[key]
+            ad[k] = ad.get(k, 0.0) + mass * w
     for name, w, code, source, step in C.DECLINE_REASONS:
         k = {"reason": name, "code": code, "source": source, "step": step}[key]
         bd[k] = bd.get(k, 0.0) + b * w
@@ -116,19 +141,19 @@ def _error_dists(key):
 
 
 def _pred_error_reason(rng, scale=None):
-    return _cat_auc(*_error_dists("reason"), rng=rng)
+    return _cat_auc(*_error_dists("reason", scale), rng=rng)
 
 
 def _pred_error_code(rng, scale=None):
-    return _cat_auc(*_error_dists("code"), rng=rng)
+    return _cat_auc(*_error_dists("code", scale), rng=rng)
 
 
 def _pred_error_source(rng, scale=None):
-    return _cat_auc(*_error_dists("source"), rng=rng)
+    return _cat_auc(*_error_dists("source", scale), rng=rng)
 
 
 def _pred_error_step(rng, scale=None):
-    return _cat_auc(*_error_dists("step"), rng=rng)
+    return _cat_auc(*_error_dists("step", scale), rng=rng)
 
 
 def _pred_method(rng, scale=None):
@@ -412,7 +437,9 @@ def _pred_card_issuer(rng, scale=None):
 MECHANISMS = {
     "status": (_pred_status,
                "Card testing declines at ATTACK_DECLINE_BASE because it tests stolen "
-               "and often expired cards; benign declines at the blended per-method rate.",
+               "and often expired cards; benign declines at the blended per-method "
+               "rate. Under spec 2.1e the attack rate falls toward "
+               "EVASIVE_VALID_DECLINE as the list grade rises.",
                "CITED: Chargebacks911 card-testing statistics; per-method rates from Razorpay"),
     "error_code": (_pred_error_code, "Non-null exactly when the attempt failed, plus reason concentration.",
                    "CITED: same as status; reason mix is ASSUMPTION (config DECLINE_REASONS)"),
