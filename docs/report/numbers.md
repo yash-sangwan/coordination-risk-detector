@@ -359,3 +359,48 @@ ALERT  pay_0000000DQkloie   t=1786258209
   The same record as data, for the audit log:
     {"action": "STEP_UP", "amount_paise": 1689, "event_id": "pay_0000000DQkloie", "expected_costs": {"HOLD_REVIEW": 125.34, "MONITOR": 177.66, "STEP_UP": 26.66}, "p_fraud": 0.964747, "rationale": "expected fraud loss exceeds step-up friction, but not the cost of occupying a reviewer", "reversible": true, "score": 0.4375, "threshold": 0.387428}
 ```
+
+---
+
+### 2026-08-30 — Streaming runtime against batch
+
+**Command.** `python -m tests.runtime.evaluate_stream data/sample`
+
+Parameters frozen from the v=0.00 train split, unchanged. No detector retuned, no generator change.
+
+**Equivalence, element by element on every event.**
+
+| detector | events | mismatches | max abs diff |
+|---|---|---|---|
+| baseline 1 rolling volume | 67,961 | **0** | 0 |
+| baseline 2 rolling decline | 67,961 | **0** | 0 |
+| baseline 3 combined | 67,961 | **0** | 0 |
+| GRAPH fanout vs overlap | 67,961 | **0** | 0 |
+
+Alerts on the graph detector: batch 3,890, stream 3,890, **identical events in identical order**.
+
+**Bounded state: peak memory against stream length.** Events read lazily, alerts handed off and not retained, so this is the runtime's own state.
+
+| events | peak KiB | max window events | alerts | KiB per event |
+|---|---|---|---|---|
+| 2,000 | 243.8 | 67 | 0 | 0.1219 |
+| 8,000 | 576.4 | 67 | 258 | 0.0720 |
+| 20,000 | 576.4 | 67 | 258 | 0.0288 |
+| 40,000 | 954.4 | 160 | 2,003 | 0.0239 |
+| 67,961 | **949.3** | 160 | 3,890 | 0.0140 |
+
+Stream length grew **34x**; peak memory grew **3.89x**, and the last row is *lower* than the one before it. Peak tracks the busiest window, which is the event **rate**, not the stream length. The steps at 8,000 and 40,000 are the first and the largest card-testing burst entering the window. Bounded.
+
+**Throughput.** 20,000 events in 15.83s = **1,264 events/sec**, 0.791 ms per event with all four detectors scored. Cost per event is O(window) rather than O(1), because the window is rescanned by the unchanged batch functions instead of updated incrementally. See decisions.md for why that trade was taken.
+
+**Detection latency per burst, measured as events arrive.**
+
+| burst | events | latency | attempts | replay path, for comparison |
+|---|---|---|---|---|
+| b02 | 518 | 0.22m | 6 | 0.22m / 6 att |
+| b03 | 1,260 | 0.15m | 6 | 0.15m / 6 att |
+
+Identical to the replay numbers, which is the point: latency is now a property of the runtime rather than of a replay script, and it did not change when it became one.
+
+**The 72 card-testing and evasive-sweep metrics were re-run and are unchanged.**
+

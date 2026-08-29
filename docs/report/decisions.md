@@ -229,3 +229,14 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 - **The graph detector is the only one whose threshold is worth freezing.** Its scores are bit-identical across the evasive grades, so its money-optimal cut barely moves and a frozen one costs under 1% at every grade. The decline baseline's cut is worth 433% of the achievable cost by the time the attacker is working a clean list. That is the earlier bit-identical-scores result restated as money, and it is the strongest form of the argument for the graph detector we have: not that it scores higher, but that **it is the only one you can set and leave**.
 - **Total cost still rises for everyone** as the attack evades, because each miss costs more. At v=1.00 the graph runs at Rs 324,970 against the decline baseline's Rs 2,763,090, an 8.5x difference in money on the same data.
 
+---
+
+### 2026-08-30 — Streaming runtime rescans the window instead of updating counters
+
+- **Chose:** hold the current window in a deque and call the **existing** batch scoring functions on it, taking the last element. Cost per event is O(window).
+- **Rejected:** incremental counters updated per event, which would be O(1) amortised and considerably faster.
+- **Why:** exactness is structural this way rather than something to chase. The detectors in `src/detector/` are already sliding-window, and they locate their window with `bisect_left(ts, t - window_s)`. If the deque holds precisely the events satisfying `ts >= t - window_s`, the window the function sees is identical in both paths, so the streaming score is not an approximation of the batch score, it **is** the same arithmetic on the same inputs. Measured: **0 mismatches on 67,961 events across all four detectors, max difference exactly 0**, and 3,890 alerts identical in the same order.
+- **The rejected option is where the bugs live.** An incremental version means reimplementing every detector's update rule, which the task explicitly ruled out, and every counter is a place the two paths can drift apart silently. We would then be maintaining two implementations and testing one against the other, four days out.
+- **What it costs:** 1,264 events/sec, 0.791 ms per event with all four detectors scored. Stated plainly as a limitation rather than presented as a design target. For this merchant, roughly 1.4 events/minute average and about 40/minute at burst peak, it is three orders of magnitude of headroom, so the constant factor buys nothing worth the risk.
+- **One boundary detail that would have broken equality:** eviction is `ts < cutoff`, strictly less than. `bisect_left` includes an event sitting exactly on the window boundary, so evicting on `<=` would have dropped one event on exact timestamp ties and produced a small, rare, hard-to-find divergence. It is called out in the code because it is the kind of thing that looks like a rounding difference and is not.
+

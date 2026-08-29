@@ -27,7 +27,8 @@ def check_import_isolation(src_root="src"):
             # to those paths. src/decision/ was added on 2026-08-30 and is held
             # to the same rule: it consumes scores and costs, never an outcome.
             inference = (os.path.join(src_root, "detector"),
-                         os.path.join(src_root, "decision"))
+                         os.path.join(src_root, "decision"),
+                         os.path.join(src_root, "runtime"))
             if p.startswith(inference) and pat_sealed.search(txt):
                 bad_sealed.append(p)
     return bad_imports, bad_sealed
