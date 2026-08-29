@@ -5,9 +5,15 @@ they behave, and rows are the consequence. Nothing here is filled in because of
 what an actor is going to do later.
 
 Section 4 benign collisions are built here, structurally, because they cannot be
-retrofitted later without planting the answer. Households share a device, some
-people share a phone, a VPA local part is usually the phone number, and an IIN is
-an issuer range that many unrelated customers sit inside.
+retrofitted later without planting the answer. Households share a device AND an
+address, some people share a phone, a VPA local part is usually the phone number,
+and an IIN is an issuer range that many unrelated customers sit inside.
+
+A benign collision that is MISSING is as much a planted answer as an attack
+marker that is added. Households sharing a device but not an address left the
+ring pattern with nothing to hide among, which is the defect recorded in
+docs/report/what-broke.md on 2026-08-30. Every collision below exists so that an
+observed one is evidence rather than proof.
 """
 
 from dataclasses import dataclass, field
@@ -218,6 +224,28 @@ def build_population(rng, n_actors: int, window_start: int, window_end: int):
     # ---- benign collisions, applied structurally over the drawn population ----
 
     # Households: 6% of accounts share a device with at least one other account.
+    #
+    # They share an ADDRESS as well as a device, because people modelled as
+    # living in one home live at one address. This is not cosmetic. Copying only
+    # the device id left "shares a pincode AND shares a device" with essentially
+    # no benign population: measured on data/sample, 1 of 652 benign
+    # device-sharing groups also shared a pincode, 0.15%. That made the
+    # conjunction close to a pure ring label and inflated the ring detector from
+    # PR AUC 0.5753 to 0.9291. See docs/report/what-broke.md, 2026-08-30.
+    #
+    # NOT APPLIED TO ANY COMMITTED DATASET. data/sample and every data/evasive
+    # step were generated before this fix and still carry the defect. Applying it
+    # means regenerating, which changes events.jsonl and therefore invalidates
+    # every card testing number and the whole evasive sweep, which is the central
+    # result. The ring numbers on record instead come from a label-free
+    # equivalent patch applied at scoring time in tests/detector/evaluate_ring.py.
+    # This code is the real fix, here for whoever regenerates next.
+    #
+    # T3 should survive it. Concentrating ~2,880 actors into ~1,152 households
+    # adds k(k-1) per household to sum(n_p^2), which is 2.700e-06 against the
+    # 0.001468 analytic pair-collision target, a +0.18% relative change and far
+    # inside T3's +/-20% band. Recheck rather than assume, but no retune of
+    # PINCODE_PAIR_COLLISION_ANALYTIC is expected.
     n_share = int(round(C.DEVICE_SHARE_RATE * n_actors))
     idxs = rng.sample(range(n_actors), n_share) if n_share else []
     j = 0
@@ -227,8 +255,10 @@ def build_population(rng, n_actors: int, window_start: int, window_end: int):
         group = idxs[j:j + size]
         if len(group) >= 2:
             shared = actors[group[0]].device_id
+            shared_pincode = actors[group[0]].pincode
             for k in group[1:]:
                 actors[k].device_id = shared
+                actors[k].pincode = shared_pincode
             households += 1
         j += size
 

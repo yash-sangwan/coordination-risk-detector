@@ -143,14 +143,45 @@ Recorded in api-probe.md (private working doc) §4. Consequence tracked in the p
 
 ---
 
-### 2026-08-30 — The ring detector's precision was the generator's, not ours
+### 2026-08-30 — Households shared a device but not an address, and that was a planted answer
 
-- **What broke:** the ring detector scored **precision 0.9444, recall 0.9444, PR AUC 0.9291** at the account level, against a structure oracle that reaches 0.4400 and a pincode baseline at 0.0037. A detector beating a label-informed oracle by that margin is a result to disbelieve first.
-- **What we thought was wrong:** a label leak in the harness, or the train sweep touching test structure.
-- **What was actually wrong:** neither. `src/generator/population.py` builds households by copying **only the device id** between members. Each actor keeps the pincode it drew independently from the weighted table, so two people modelled as sharing a home live at two different postcodes. Measured: of **652** benign device-sharing groups in the window, exactly **1** also shares a pincode, **0.15%**. The conjunction "shares a pincode AND shares a device" therefore has almost no benign population to compete with, and its precision is a property of the generator rather than of the detector.
-- **What pointed at it:** stage 1 alone scored **precision 1.0000** with zero false positives. A hand-built two-attribute rule achieving perfect precision on 12,482 accounts is not a detector working, it is a label being read.
-- **How we handled it:** the datasets were **not** regenerated, because that would invalidate every number already recorded for card testing and the evasive sweep. Instead the harness applies a counterfactual at scoring time, giving every shared-device account group a common pincode. It uses no labels, since "accounts observed on one device" is visible in the event stream, and it is a no-op for ring members who already share their drop address. Against that repaired population the detector scores **PR AUC 0.5753**, and that is the number we quote. The 0.9291 is reported beside it only as the artefact it is.
-- **The part worth remembering:** this is the same failure the project already refused once, when an address hash finer than pincode was rejected in August because "two accounts share an address" would be close to a pure label. The defect arrived anyway, through the benign side rather than the attack side: not by planting a signal in the ring, but by **omitting one from the households the ring should have been hiding among**. A missing benign collision is as much a planted answer as an added attack marker, and it is much harder to see.
+**The most consequential defect in the project so far.** It did not add a signal to the attack. It removed one from the benign population, which is harder to see and does the same damage.
+
+**What broke.** The ring detector, scored at the account level on the test split, returned **precision 0.9444, recall 0.9444, PR AUC 0.9291**. The structure oracle for the same pattern reaches **0.4400**, and the oracle is allowed to read the sealed store at configuration time. A detector built from the event stream alone had apparently beaten a label-informed oracle by more than double.
+
+**What prompted the check was that number, not the report.** Nothing failed. No test flagged it, the isolation checks were clean, the train/test protocol was correct, and every acceptance test behaved exactly as before. Had the result been 0.52 it would have been written up and shipped. It was investigated only because beating an informed oracle by that margin is not a thing that happens, and a result too good to be true is a claim to disbelieve first and verify second.
+
+**What we thought was wrong.** A label leak in the harness, or the train sweep seeing test structure through the shared cluster construction.
+
+**What was actually wrong.** Neither. `src/generator/population.py` built households by copying **only the device id** between members:
+
+```python
+shared = actors[group[0]].device_id
+for k in group[1:]:
+    actors[k].device_id = shared        # and nothing else
+```
+
+Each actor kept the pincode it had drawn independently from the weighted table. So two people the generator modelled as living in one home lived at two different postcodes. Measured on `data/sample`: of **652 benign device-sharing groups observed in the window, exactly 1 also shared a pincode. 0.15%.**
+
+The ring pattern's defining structure is that its members share a drop address and, partially, a device. With benign households failing to share an address, **"shares a pincode AND shares a device" had almost no benign population to compete with.** It was not a hard signal the detector had learned to find. It was close to a pure label, and stage 1 of the detector confirmed it by scoring **precision 1.0000 with zero false positives** across 12,482 accounts. A hand-built two-attribute rule achieving perfect precision at a 0.144% base rate is not a detector working.
+
+**The tell we walked past first.** Detection latency came out **negative**: -6.2 days for r01 and -10.1 days for r02, meaning the detector fired before either ring transacted at all. That was rationalised on the spot as a real and even interesting property, since ring members share the drop address and device from account setup and the structure genuinely does exist through the dormancy period. That reasoning is not wrong, and it was still the wrong conclusion to stop at. A detector that identifies a ring before the ring does anything is reading the ring's *construction*, and the right response was to ask what made the construction visible rather than to admire that it was. On the repaired population the same replay gives **+3.8 and +5.9 days**, with one ring of three never detected at all.
+
+**This is the same failure we refused in August, arriving from the other side.** On 2026-08-28 an address hash finer than pincode was rejected, on the grounds that it "would work far too well" because a per-flat identifier has near-zero benign collision, so "two accounts share an address" would be close to a pure label. That judgement was correct and the defect landed anyway, because it was guarded on only one side. We were watching for a signal **planted in the attack** and the gap was an **omission in the benign population**. Both produce a pure label. A missing benign collision is a planted answer, and it leaves no artefact to grep for: the ring code was correct, the household code looked correct, and only the joint distribution was wrong.
+
+**The numbers, patched against unpatched.**
+
+| detector | PR AUC as generated | PR AUC households fixed |
+|---|---|---|
+| pincode baseline | 0.0037 | 0.0036 |
+| stage 1 only, conjunction | 0.3343 | 0.2291 |
+| **ring detector, conj + drop address** | **0.9291** | **0.5753** |
+
+**0.9291 against 0.5753.** The gap is the defect. The baseline barely moves, which is itself confirming: the pincode baseline never used the device edge, so it had nothing to lose.
+
+**How we fixed it.** `population.py` now copies the pincode along with the device id. The committed datasets were **not** regenerated, for the reason recorded in decisions.md, and the reported ring numbers come instead from a label-free equivalent patch applied at scoring time. The generator fix is real and is there for whoever regenerates next.
+
+**The part worth remembering.** Every acceptance test passed throughout. T1 through T8 are built to catch a signal planted in the attack, and this was the absence of a signal in the benign population, which none of them measures. The thing that caught it was a number that was better than it had any right to be.
 
 ---
 
