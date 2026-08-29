@@ -121,8 +121,83 @@ def conjunction_components(pins, devs):
     return [c for c in comps.values() if len(c) >= 2], by_pin
 
 
+def pair_share_rate(pins, devs):
+    """P(two random accounts share a device), measured on THIS window.
+
+    This is the background the conjunction is judged against. It is a rate, not
+    a count, but it is not itself window-invariant: a device carries one to three
+    accounts however long you watch, so the number of sharing groups grows with
+    the account count A while the pair denominator grows as A^2, leaving this
+    quantity falling as ~1/A. That is exactly the factor that cancels the growth
+    in cluster size, which is why dividing by it produces a scale-free score.
+    """
+    by_dev = _invert(devs)
+    a = len(devs)
+    if a < 2:
+        return 0.0
+    pairs = sum(len(v) * (len(v) - 1) / 2.0 for v in by_dev.values() if len(v) > 1)
+    return pairs / (a * (a - 1) / 2.0)
+
+
+SCORE_MODES = ("raw", "density", "lift", "bg", "q95", "rank")
+
+
+def _pin_weight(mode, k, population, p_pair):
+    """Evidence attaching to one pincode, in the chosen units.
+
+    raw      k^2 / n. The original. NOT scale invariant: k and n both grow with
+             the observation window, so this grows with it too. Kept only so the
+             comparison has the old behaviour in it.
+
+    density  k / n. The share of a pincode's accounts that are device linked.
+             Dimensionless and exactly invariant, because k and n scale together.
+             Says nothing about how surprising that share is.
+
+    lift     observed conjunction rate over the rate this window would produce by
+             CHANCE. Under a null where devices are assigned independently of
+             pincodes, an account on a pincode of n has about (n-1) chances to be
+             device linked to a neighbour, each with probability p_pair, so the
+             expected linked count is n(n-1)p_pair. Dividing the observed k by it
+             gives a ratio against an analytic background rate. MEASURED, this
+             drifts badly and in the opposite direction to raw, for the reason
+             below.
+
+    bg       raw, divided by the median raw weight of every candidate cluster in
+             the SAME window. See the note below: this is the one that transfers.
+
+    Why the analytic normalisations do not work, measured rather than assumed.
+    All of raw, density and lift assume k and n scale together as the window
+    grows. They do not. A pincode's population saturates almost immediately,
+    since every ring member shows up early, while k, the size of the observed
+    device-linked component, keeps growing because a link needs BOTH endpoints
+    and their shared device to have been seen. So k accumulates and n does not,
+    and the drift is in the EVIDENCE rather than in the units. No closed form in
+    (k, n, p_pair) can cancel it. Measured across test windows of 10/20/30/50%:
+    raw drifts 1.125 -> 2.286, density 0.375 -> 0.571, lift 2.0e4 -> 3.4e3.
+
+    What does cancel it is a background that accumulates at the same rate as the
+    signal, which is the window's own population of clusters. `bg` divides by the
+    median candidate weight in the same window, so it reads "this cluster is N
+    times the typical cluster this window produces". That is the sentence the
+    score was always trying to express, and because it is a single constant per
+    window it is a pure rescale: the RANKING within a window is untouched, so
+    PR AUC is identical to raw and the fix costs nothing in discrimination. What
+    it buys is a threshold that means the same thing on any window.
+    """
+    if population < 2:
+        return 0.0
+    if mode in ("raw", "bg", "q95", "rank"):   # all rescaled per window below
+        return k * (k / population)
+    if mode == "density":
+        return k / population
+    if mode == "lift":
+        expected = population * (population - 1) * p_pair
+        return (k / expected) if expected > 0 else 0.0
+    raise KeyError(mode)
+
+
 def score_accounts(events, min_component=2, out_weight=0.35, contact_weight=0.0,
-                   min_pin_population=0):
+                   min_pin_population=0, score_mode="raw"):
     """Continuous ring score per account. Higher is more suspicious.
 
     `out_weight` is the discount applied to an account that sits on an
@@ -149,10 +224,10 @@ def score_accounts(events, min_component=2, out_weight=0.35, contact_weight=0.0,
     """
     pins, devs, cons, _ = account_attributes(events)
     comps, by_pin = conjunction_components(pins, devs)
+    p_pair = pair_share_rate(pins, devs)
 
-    # Strongest conjunction evidence attaching to each pincode, as (size,
-    # density). Density is size relative to how populous that pincode is, which
-    # is what separates a small drop address from a busy commercial one.
+    # Strongest conjunction evidence attaching to each pincode, in whichever
+    # units `score_mode` selects. Density and lift are scale free; raw is not.
     pin_evidence = {}
     for comp in comps:
         if len(comp) < min_component:
@@ -162,10 +237,40 @@ def score_accounts(events, min_component=2, out_weight=0.35, contact_weight=0.0,
             population = len(by_pin.get(p, ()))
             if population < max(2, min_pin_population):
                 continue
-            density = len(comp) / population
-            weight = len(comp) * density
+            weight = _pin_weight(score_mode, len(comp), population, p_pair)
             if weight > pin_evidence.get(p, (0.0,))[0]:
                 pin_evidence[p] = (weight, comp)
+
+    if score_mode in ("bg", "q95", "rank") and pin_evidence:
+        # Normalise against the window's OWN population of candidate clusters,
+        # which is the only background that accumulates evidence at the same rate
+        # the signal does. All three are monotone within a window, so the ranking
+        # and therefore PR AUC are untouched; only the threshold's meaning moves.
+        ws = sorted(w for w, _ in pin_evidence.values())
+        n = len(ws)
+        if score_mode == "bg":
+            # Ratio to the TYPICAL cluster. Median, so a few large clusters
+            # cannot inflate their own denominator.
+            ref = ws[n // 2] if n % 2 else (ws[n // 2 - 1] + ws[n // 2]) / 2.0
+            if ref > 0:
+                pin_evidence = {p: (w / ref, c)
+                                for p, (w, c) in pin_evidence.items()}
+        elif score_mode == "q95":
+            # Ratio to the TAIL. A detector's operating point lives in the tail,
+            # not the middle, so the tail is the reference that has to be stable.
+            ref = ws[min(n - 1, int(0.95 * n))]
+            if ref > 0:
+                pin_evidence = {p: (w / ref, c)
+                                for p, (w, c) in pin_evidence.items()}
+        else:
+            # Pure quantile position: the share of this window's clusters that
+            # this one exceeds. Unitless by construction, so a threshold of 0.99
+            # means "top 1% of clusters" on any window of any length.
+            below = {}
+            for w in ws:
+                below.setdefault(w, sum(1 for x in ws if x < w) / n)
+            pin_evidence = {p: (below[w], c)
+                            for p, (w, c) in pin_evidence.items()}
 
     by_con = _invert(cons)
     scores = {}

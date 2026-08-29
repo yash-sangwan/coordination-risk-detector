@@ -16,8 +16,9 @@ import numpy as np
 from sklearn.metrics import average_precision_score, precision_recall_curve
 
 from src.detector.baselines import score_pincode_sharing
-from src.detector.ring import (account_attributes, conjunction_components,
-                               score_accounts, score_pincode_only)
+from src.detector.ring import (SCORE_MODES, account_attributes,
+                               conjunction_components, score_accounts,
+                               score_pincode_only)
 from tests.baselines.evaluate import prf
 from tests.fixtures import load_events, load_manifest, labels_by_id
 
@@ -273,17 +274,46 @@ def run(events, manifest, lab, tag, note):
 
     # -------------------------------------------------------------- tune
     grid = []
-    for mc in (2, 3):
-        for ow in (0.0, 0.15, 0.35, 0.60, 1.0):
-            for cw in (0.0, 0.5):
-                for mp in (0, 4, 6, 8):
-                    p = {"min_component": mc, "out_weight": ow,
-                         "contact_weight": cw, "min_pin_population": mp}
-                    s = score_accounts(tr, **p)
-                    thr, f1 = best_cut(s, pos_tr, uni_tr)
-                    grid.append((f1, p, thr))
-    grid.sort(key=lambda t: -t[0])
-    best_f1, P, THR = grid[0]
+    for sm in SCORE_MODES:
+        for mc in (2, 3):
+            for ow in (0.0, 0.15, 0.35, 0.60, 1.0):
+                for cw in (0.0,):
+                    for mp in (0, 4, 6, 8):
+                        p = {"min_component": mc, "out_weight": ow,
+                             "contact_weight": cw, "min_pin_population": mp,
+                             "score_mode": sm}
+                        s = score_accounts(tr, **p)
+                        thr, f1 = best_cut(s, pos_tr, uni_tr)
+                        grid.append((f1, p, thr))
+    # Selection, in two stages, both on TRAIN.
+    #   1. train F1, which measures discrimination inside one window
+    #   2. among everything tied at the top of that, train-side TRANSFER, which
+    #      is the property this fix exists to buy
+    # Stage 2 is necessary rather than decorative: the scale-free modes are
+    # monotone transforms of each other within a window, so stage 1 cannot tell
+    # them apart and an arbitrary tie-break decides otherwise.
+    top = max(f1 for f1, _, _ in grid)
+    tied = [g for g in grid if g[0] >= top - 1e-9]
+    scored = []
+    for f1, p, thr in tied:
+        mean_f1, fired, n = train_transfer(tr, lab, p, thr)
+        scored.append((mean_f1, fired, f1, p, thr))
+    scored.sort(key=lambda t: (-t[0], -t[1]))
+    print(f"\n  train F1 ties at {top:.4f} across {len(tied)} configurations, "
+          f"so the tie is broken on TRAIN-SIDE TRANSFER:")
+    print(f"    {'mode':>9} {'min_pop':>8} {'sub-window F1':>14} {'fired':>7}")
+    seen = set()
+    for mean_f1, fired, f1, p, thr in scored:
+        key = (p["score_mode"], p["min_pin_population"])
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f"    {p['score_mode']:>9} {p['min_pin_population']:>8} "
+              f"{mean_f1:>14.4f} {fired:>5}/3")
+        if len(seen) >= 8:
+            break
+    _, _, best_f1, P, THR = scored[0]
+    grid = [(f1, p, thr) for _, _, f1, p, thr in scored]
     print(f"\n  tuned on TRAIN: {P}, threshold {THR:.4f} (train F1 {best_f1:.4f})")
     print("  top of the train sweep:")
     for f1, p, t in grid[:5]:
@@ -294,12 +324,14 @@ def run(events, manifest, lab, tag, note):
     s_pin = score_pincode_sharing(te)
     s_stage1 = score_accounts(te, min_component=P["min_component"],
                               out_weight=0.0, contact_weight=0.0,
-                              min_pin_population=P["min_pin_population"])
+                              min_pin_population=P["min_pin_population"],
+                              score_mode=P["score_mode"])
 
     pin_thr, _ = best_cut(score_pincode_sharing(tr), pos_tr, uni_tr)
     s1_thr, _ = best_cut(score_accounts(
         tr, min_component=P["min_component"], out_weight=0.0, contact_weight=0.0,
-        min_pin_population=P["min_pin_population"]), pos_tr, uni_tr)
+        min_pin_population=P["min_pin_population"],
+        score_mode=P["score_mode"]), pos_tr, uni_tr)
 
     rows = [
         evaluate("pincode baseline (peers on pincode)", s_pin, pos_te, pin_thr, universe),
@@ -343,7 +375,80 @@ def run(events, manifest, lab, tag, note):
 
     latency(events, lab, manifest, THR, P, pos_te)
     false_positives(te, s_ours, pos_te, THR)
-    return rows
+    return rows, P, THR
+
+
+def train_transfer(tr, lab, params, thr, fracs=(0.30, 0.50, 0.70)):
+    """Does this threshold still fire on shorter windows WITHIN train?
+
+    Train F1 cannot choose between the scale-free modes, and not by accident:
+    raw, bg, q95 and rank are monotone transforms of one another inside a single
+    window, so they produce identical rankings and therefore identical train F1.
+    Selecting on F1 leaves the choice to an arbitrary tie-break, which is how the
+    worst-transferring mode got picked first.
+
+    Transfer is the property being bought, so transfer is what has to be
+    measured. This applies the full-train threshold to sub-windows OF TRAIN and
+    reports how it holds up. It touches no test data.
+    """
+    scores = []
+    fired = 0
+    for f in fracs:
+        sub = tr[int(len(tr) * (1.0 - f)):]
+        pos = ring_accounts(sub, lab)
+        uni = {e["merchant_context"]["account_id"] for e in sub
+               if e["merchant_context"]["account_id"]}
+        if not pos:
+            continue
+        _, y, s = vectors(score_accounts(sub, **params), pos, uni)
+        _, _, f1, _, _ = prf(y, s >= thr)
+        scores.append(f1)
+        fired += int((s >= thr).sum() > 0)
+    return (sum(scores) / len(scores) if scores else 0.0), fired, len(scores)
+
+
+def stability(events, lab, P, THR, modes=SCORE_MODES):
+    """Does the train threshold still mean the same thing on a different window?
+
+    The whole point of the fix. Each mode is scored on test windows of several
+    lengths using the threshold tuned on the 70% train split, and we look at
+    whether the cut keeps firing and whether the raw score magnitudes drift.
+    """
+    print("\n" + "=" * 88)
+    print("SCALE INVARIANCE: one train threshold, several test window lengths")
+    print("=" * 88)
+    print("  The threshold is tuned once on the 70% train split of the patched")
+    print("  population and then applied unchanged to test windows of different")
+    print("  lengths. A scale-free score keeps firing; a scale-dependent one")
+    print("  drifts out of range, which is the defect being fixed.")
+
+    cut = int(len(events) * SPLIT)
+    tr = events[:cut]
+    pos_tr = ring_accounts(tr, lab)
+    uni_tr = {e["merchant_context"]["account_id"] for e in tr
+              if e["merchant_context"]["account_id"]}
+
+    for mode in modes:
+        params = dict(P)
+        params["score_mode"] = mode
+        thr, _ = best_cut(score_accounts(tr, **params), pos_tr, uni_tr)
+        print(f"\n  mode {mode!r}: threshold tuned on train = {thr:.6g}")
+        print(f"    {'test window':>13} {'events':>8} {'accounts':>9} "
+              f"{'max score':>11} {'flagged':>8} {'prec':>7} {'recall':>7} "
+              f"{'PR AUC':>8}")
+        for frac in (0.10, 0.20, 0.30, 0.50):
+            te = events[int(len(events) * (1.0 - frac)):]
+            pos = ring_accounts(te, lab)
+            uni = {e["merchant_context"]["account_id"] for e in te
+                   if e["merchant_context"]["account_id"]}
+            if not pos:
+                continue
+            s = score_accounts(te, **params)
+            r = evaluate(mode, s, pos, thr, uni)
+            top = max(s.values()) if s else 0.0
+            print(f"    {('last %.0f%%' % (frac*100)):>13} {len(te):>8} "
+                  f"{len(uni):>9} {top:>11.4g} {r['flagged']:>8} "
+                  f"{r['precision']:>7.4f} {r['recall']:>7.4f} {r['ap']:>8.4f}")
 
 
 def main(path):
@@ -355,13 +460,17 @@ def main(path):
     print(f"RING DETECTOR, ACCOUNT LEVEL   data={path}")
     print("=" * 88)
 
-    a = run(events, manifest, lab, "POPULATION AS GENERATED",
-            "Households share a device but NOT a pincode. See the caveat below.")
+    a, _, _ = run(events, manifest, lab, "POPULATION AS GENERATED",
+                  "Households share a device but NOT a pincode. See the caveat "
+                  "below.")
 
-    b = run(patch_households(events), manifest, lab,
-            "COUNTERFACTUAL: HOUSEHOLDS SHARE AN ADDRESS",
-            "Every shared-device account group given a common pincode, using no "
-            "labels.")
+    patched = patch_households(events)
+    b, P, THR = run(patched, manifest, lab,
+                    "COUNTERFACTUAL: HOUSEHOLDS SHARE AN ADDRESS",
+                    "Every shared-device account group given a common pincode, "
+                    "using no labels.")
+
+    stability(patched, lab, P, THR)
 
     print("\n" + "=" * 88)
     print("THE TWO POPULATIONS SIDE BY SIDE (test split, PR AUC)")
