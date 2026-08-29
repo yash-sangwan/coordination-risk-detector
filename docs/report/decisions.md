@@ -117,3 +117,14 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 - **Why unweighted:** A controlled drop address is chosen for operational control, not for being in a busy commercial area. Under the weighted draw, 2 of 3 rings landed on hot urban pincodes shared with 125 and 130 innocent accounts, so the drop address carried almost no information: maximum precision from pincode alone was 0.053 and 0.078. Drops now sit on clusters of 7 to 11 accounts.
 - **Why no address hash:** it would work far too well. A per-flat identifier would have near-zero benign collision, so "two accounts share an address" would be close to a pure label. That is exactly the failure `device_id` is showing right now at a 1746x attack-to-benign ratio in pair units. Adding a second attribute with the same defect would buy detectability by planting the answer.
 - **Leak checked, not assumed:** rarity does not become the label, because rare pincodes are ordinary for legitimate traffic. 69.0% of benign orders already land on a pincode with 15 or fewer accounts, and the benign cluster distribution is unchanged (median 1, p90 10, max 141). T1 AUC for `shipping_pincode` moved 0.8776 to 0.8846, and the rarity-only variant 0.8765 to 0.8809. No jump.
+
+---
+
+### 2026-08-28 — Ring ships without clearing its T8 floor, as a measured limitation
+
+- **Chose:** Ship the ring pattern with its ceiling stated. Account-level recall is **0.44 against a 0.60 floor**, and the cause is that only **40% of ring members share a device**, which is exactly where recall saturates.
+- **Rejected:** Raising `RING_DEVICE_SUBSET` to clear the floor.
+- **Why:** A ring in which every member transacts from one device is not a realistic ring. Members deliberately use separate accounts and separate instruments; partial device sloppiness is the realistic case, and it is what makes the pattern hard. Raising the sharing rate would buy the number by making the world less true, which is the failure mode section 4 exists to prevent. The floor is a target we did not hit, not a threshold to move.
+- **How it ships:** as a measured limitation with the ceiling and its cause stated, not as a solved problem. Anyone reading the numbers sees 0.44, why it is 0.44, and what would have to change.
+
+**Second limitation, recorded alongside it.** Attack contacts are **100% unique** in the generated stream, which is optimistic. Real carding bots recycle number pools, so `contact` is more separable here than it would be against a real attacker. The same is true to a lesser degree of any field where we assume a fresh identity per attempt.

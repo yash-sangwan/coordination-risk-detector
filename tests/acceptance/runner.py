@@ -121,7 +121,7 @@ def encode(rows, field):
 
 # ---------------------------------------------------------------------- tests
 
-def t1(rows, y, cut):
+def t1(rows, y, cut, scale=None):
     print("\n--- T1: single-feature ceiling (every field, chronological split) ---")
     print(f"  {'field':<22} {'AUC':>8}   {'verdict':<46} encoding")
     fields = list(flatten_keys)
@@ -139,7 +139,7 @@ def t1(rows, y, cut):
         if f in MECHANISMS:
             # T1a: mechanism-bounded. Predicted from declared config constants,
             # never from the observed data.
-            pred = predicted(f)
+            pred = predicted(f, scale)
             over = auc - pred
             if over > TOLERANCE:
                 v = "FAIL  exceeds mechanism by %+.3f" % over
@@ -534,7 +534,8 @@ def main(path):
           f"chronological split {SPLIT:.0%} -> train {cut} / test {len(rows)-cut}")
     print("=" * 78)
 
-    t1res = t1(rows, y, cut)
+    scale = {"n_actors": manifest["n_actors"], "days": manifest["days"]}
+    t1res = t1(rows, y, cut, scale)
     rng = np.random.default_rng(0)
     t2res = t2(rows, y, cut, rng)
     t3res = t3(events, lab)
