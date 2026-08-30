@@ -1,6 +1,13 @@
 # Generator Spec — Coordination Detector Stream
 
-**Status:** spec only. No code, no data generated.
+**Status:** **built, and corrected in place.** This was written as a
+specification before any code existed. Everything in it was then implemented,
+and measurement overturned a number of its claims. Those claims are **left
+standing with a dated correction beneath them** rather than rewritten, because a
+document that only ever contained right answers would say less about how much to
+trust the numbers than one that shows where it was wrong and what the evidence
+was. Numbers produced by the current code live in `results/results.json`; where
+this document and that artifact disagree, **the artifact is authoritative**.
 **Produces:** the record defined in [event-schema.md](event-schema.md), plus a separate sealed outcome store.
 **Goal:** someone else could build this and get comparable data.
 
@@ -96,7 +103,19 @@ Legitimate payments fail constantly, and per method:
 
 Overall D2C success sits at **68–74%** against an achievable 85%+, so a realistic blended failure rate is roughly **1 in 4 legitimate attempts** once method mix and geography are folded in.
 
+> **Corrected 2026-08-30. The measured benign decline rate is 5.57%, not ~25%, and that is the correct outcome.** Recorded as conflict `C2` in `src/generator/config.py`.
+>
+> The two figures have **different denominators**. The 68–74% is end-to-end and includes pre-gateway checkout abandonment, which never becomes a payment attempt. Our record is a **gateway attempt** (see the schema's second stated assumption), so the per-method rates in the table above govern instead, and they blend to `0.55x0.992 + 0.28x0.875 + 0.09x0.925 + 0.06x0.90 + 0.02x0.90 = 94.6%` success.
+>
+> Only one of the two can describe this stream, and it is the per-method one. The "1 in 4" sentence describes a funnel we do not model. It is left in place because it is the reasoning that produced the conflict, and because anyone comparing our decline rate to an industry headline will hit the same mismatch.
+
 Geographic modulation, cited from the same page: metro 78–82%, tier-2 62–68%, tier-3 55–62%. Assign each actor a tier from their pincode.
+
+> **Corrected 2026-08-28. Implemented as relative multipliers, not absolute levels.** Recorded as conflict `C4` in `src/generator/config.py`.
+>
+> These absolutes cannot coexist with the per-method rates above. UPI alone is 99.2% successful and is 55% of traffic, so **a tier-3 actor paying by UPI cannot be at 58% success**. The two constraints are simply incompatible at the row level.
+>
+> Geography is therefore a multiplier on decline probability (`TIER_DECLINE_MULT`, metro 1.0 / tier-2 1.6 / tier-3 2.4) that preserves the cited **ordering** metro < tier-2 < tier-3 without asserting the cited levels. The multipliers are normalised to mean 1 over the population so they do not double-count the per-method rates, which already blend across geography.
 
 Failure reason mix for legitimate declines (assumption for the split; the categories are Razorpay's):
 
@@ -112,6 +131,12 @@ Note `payment_cancelled` and `input_validation_failed` were both observed live i
 
 **Retry behaviour.** Automated retries recover 15–20% of failed transactions ([Razorpay](https://razorpay.com/blog/payment-success-rate-optimization-india/)). So a legitimate failed attempt is followed by a retry ~35% of the time, within 30–180 seconds, same `order_id`, incrementing `attempt_seq`. This is why `attempt_seq > 1` cannot be a fraud signal on its own.
 
+> **Corrected 2026-08-28. The two numbers in this paragraph are not compatible, and the achieved recovery is ~33%, not 15–20%.** Recorded as conflict `C3` in `src/generator/config.py`.
+>
+> A 35% retry rate at a ~93% retry success rate gives **~33% recovery**, roughly double the cited 15–20%. We followed the **35% retry rate**, because that is the explicit behavioural instruction and it is the one that shapes the stream, and we report the achieved recovery rather than tuning to the cited figure.
+>
+> The conclusion the paragraph draws is unaffected: `attempt_seq > 1` is common in legitimate traffic either way, so it cannot be a fraud signal on its own.
+
 **Downtime windows.** The probe found 11 real downtime records, all `severity: high`, spanning `card`, `netbanking`, `upi` and `fpx`. Model 1–3 downtime windows per simulated month affecting one method or issuer, during which that method's decline rate rises 5–10× and `error_source` shifts toward `gateway`. This produces correlated decline spikes with no fraud in them, which is exactly the confounder a burst detector must survive.
 
 ---
@@ -126,6 +151,12 @@ Note `payment_cancelled` and `input_validation_failed` were both observed live i
 
 - *Burst:* 10–90 minutes of sustained attempts at 20–200 attempts/minute.
 - *Campaign:* bursts recur over days or weeks. The citable anchor for campaign shape is an airline whose carding attempts climbed from **under 1% of transactions early in 2025 to over 8% at peak, then fell back below 1% by year end** ([Chargebacks911](https://chargebacks911.com/ecommerce-fraud/card-testing/card-testing-statistics-financial-impact/)). Slow rise, sustained plateau, decline.
+
+> **Narrowed 2026-08-28 to the bottom of both bands: 10–45 minutes at 20–60 attempts/minute** (`BURST_MINUTES`, `BURST_RATE_PER_MIN`). The reason previously lived only in `config.py`.
+>
+> The narrowing is **arithmetic, not preference**. This merchant runs ~2,016 events/day, about 1.4/minute on average and ~3/minute at peak. A single 90-minute burst at 200/minute is **18,000 events, 22.9% of the entire 30-day stream on its own**. The cited anchor immediately above is a merchant whose carding *peaked* at 8% of transactions, so the top of the stated range is incoherent at this volume.
+>
+> **It is the merchant that is small, not the spec that is wrong.** The bands are right for a large merchant; we sit at the bottom of both because of who we modelled. `BURSTS_PER_CAMPAIGN` came down for the same reason: at 8–13 bursts, attack prevalence reached 12.4%, far above the 8%-at-peak anchor.
 
 Volume sanity check: Visa's VAMP rules flag a merchant as "Excessive" above **300,000 enumeration attempts per month** at a **20%+ enumeration ratio**, effective 1 October 2025 ([Chargebacks911](https://chargebacks911.com/ecommerce-fraud/card-testing/card-testing-statistics-financial-impact/)). Our merchant is far smaller, so bursts should sit well below that, but the ratio is the useful part: enumeration as a fraction of total attempts is the industry's own metric.
 
@@ -387,7 +418,11 @@ The drop pincode is drawn **unweighted** over the pincode list, unlike a custome
 > - **All eight Razorpay figures were confirmed verbatim** in the raw page text. One caveat worth recording: the string "8–12 percentage points" appears in that article **twice with two different meanings** — once for what optimization can *recover*, and once for the evening-peak drop. The figure cited here is the second: *"Payment success rates drop 8–12 percentage points during evening peaks (7–10 PM) when multiple banks experience load-related slowdowns."* Anyone re-checking this citation will hit the other occurrence first.
 > - **The UPI technical decline figure now cites NPCI directly** rather than the Razorpay blog, since NPCI is the primary publisher. See the table row.
 >
-> A bonus figure found during verification, directly relevant to the Track 02 false-positive-cost requirement and not yet used anywhere: *"For every ₹100 saved by preventing fraud, brands lose ₹400–600 to falsely declined legitimate orders"* ([Razorpay](https://razorpay.com/blog/payment-success-rate-optimization-india/)). That is a citable 4–6x asymmetry against over-blocking.
+> A bonus figure found during verification, directly relevant to the Track 02 false-positive-cost requirement and ~~not yet used anywhere~~: *"For every ₹100 saved by preventing fraud, brands lose ₹400–600 to falsely declined legitimate orders"* ([Razorpay](https://razorpay.com/blog/payment-success-rate-optimization-india/)). That is a citable 4–6x asymmetry against over-blocking.
+>
+> **Used 2026-08-30.** It became the foundation of the decision layer in `src/decision/`. The 4–6x asymmetry is why that layer has **no `DECLINE` action at all**: at that penalty an outright block is a bad trade at any precision we can reach, so it is absent from the code rather than merely discouraged. The three available actions, monitor, step up, hold for review, are all reversible.
+>
+> One caveat, recorded because it is a failed check rather than a passed one. Our per-event cost model implies **1.54x**, not 4–6x, and the gap is structural: the model prices the immediate lost order, while this citation is the full economic cost of a false decline, dominated by the customer not returning. Inverted, the citation implies a false decline costs 2.6–3.9x one order margin. See `docs/report/decisions.md`, 2026-08-30.
 
 Marked **[cited]** or **[assumption]**. No assumption is dressed as a finding.
 
@@ -406,7 +441,7 @@ Marked **[cited]** or **[assumption]**. No assumption is dressed as a finding.
 | Visa VAMP enumeration threshold | 300,000/month, 20% ratio, from 1 Oct 2025 | **[cited]** Chargebacks911 |
 | Reference fraud prevalence | 3.5% | **[cited]** IEEE-CIS, 590,540 txns ([Kaggle](https://www.kaggle.com/competitions/ieee-fraud-detection/data)) |
 | CGNAT prevalence, Indian ISPs | near-universal on mobile (Jio, Airtel, BSNL, ACT) | **[cited]** [A10](https://www.a10networks.com/glossary/what-is-carrier-grade-nat-cgn-cgnat/), [PureVPN](https://www.purevpn.com/blog/top-isps-using-cgnat/) |
-| **Attack-event prevalence in our stream** | **2.5% of attempts** | **[assumption]** Chosen to sit near IEEE-CIS's 3.5% while reflecting that our stream is attempt-level, so declines inflate the denominator. |
+| **Attack-event prevalence in our stream** | ~~**2.5% of attempts**~~ → **measured 5.77%** | **[assumption, superseded by measurement 2026-08-30]** 2.5% was chosen to sit near IEEE-CIS's 3.5% while reflecting that our stream is attempt-level, so declines inflate the denominator. The generated stream runs at **5.77%** (card testing plus rings). The gap is merchant size: attack volume is **absolute**, set by burst count, duration and rate, so only the legitimate side scales. Reaching 2.5% needs roughly 333,000 actors against our 40,000, which costs ~10 minutes per generation and was **deliberately not paid**. Recorded as a known limitation in `docs/report/decisions.md`, 2026-08-28. |
 | **Card testing / ring split** | **80% / 20% of attack events** | **[assumption]** Reflects that card testing is far higher volume per incident. |
 | **Actor population mix** | 55 / 35 / 10 | **[assumption]** |
 | **Method mix** | 55/28/9/6/2 | **[assumption]**, directionally anchored on UPI dominance |
@@ -504,7 +539,7 @@ For each field in turn, train a one-feature model (gradient-boosted stump ensemb
 | 0.70 < AUC ≤ 0.75 | Investigate. Document the mechanism. A field may legitimately land here if the mechanism is real and cited. |
 | AUC > 0.75 | **Fail.** Treat as planted. Fix the generative process for that field. |
 
-Thresholds are **chosen, not derived**, and that is stated on the tin. The reasoning: with attack prevalence at 2.5%, no single raw attribute should separate the classes well, because real fraud is a joint pattern. `amount`, `checkout_ms` and `error_reason` are the fields expected to sit highest, and each has a cited real mechanism.
+Thresholds are **chosen, not derived**, and that is stated on the tin. The reasoning: with attack prevalence at 2.5% *(measured 5.77%, see §3; the argument does not turn on the exact figure, only on the class being a small minority)*, no single raw attribute should separate the classes well, because real fraud is a joint pattern. `amount`, `checkout_ms` and `error_reason` are the fields expected to sit highest, and each has a cited real mechanism.
 
 **Additionally:** no field may have an AUC of exactly 0.5 across all runs either. A field that is pure noise for both populations is a field that should be cut, not shipped.
 
@@ -539,11 +574,11 @@ A genuinely discriminative field lands at roughly the AUC its declared generativ
 >
 > **Scope.** Four fields shared the broken predictor: `contact`, `email`, `card.last4` and `vpa`. All four were fixed, not the two that happened to be under discussion. Two of them, `card.last4` and `vpa`, also needed a mechanism the old version lacked entirely: they are populated only on card and UPI rows respectively, so most rows fall into a shared NULL bucket whose frequency dwarfs any real value. For those two, nullness rather than uniqueness is the operative mechanism. The predictor now scores on the simulated frequency directly, exactly as the encoder does, so it captures whichever mechanism is stronger without having to choose in advance.
 
-**Nothing is silently exempt.** Every mechanism-bounded field is listed in `MECHANISMS` in `tests/acceptance/runner.py` with a named mechanism, the config constants it is computed from, and a citation or an explicit assumption tag. A field cannot be added to that table without one. The table is auditable in one place, which a scattering of exemptions would not be.
+**Nothing is silently exempt.** Every mechanism-bounded field is listed in `MECHANISMS` in `tests/acceptance/mechanisms.py` *(corrected 2026-08-30: this said `runner.py`, which imports the table but does not define it)* with a named mechanism, the config constants it is computed from, and a citation or an explicit assumption tag. A field cannot be added to that table without one. The table is auditable in one place, which a scattering of exemptions would not be.
 
 ### T2 — Label shuffle
 
-Shuffle labels within the training set, preserving prevalence, and retrain the full model. Repeat 20 times.
+Shuffle labels within the training set, preserving prevalence, and retrain the full model. Repeat ~~20~~ **350** times *(20 → 50 on 2026-08-28, 50 → 350 on 2026-08-29; see the two notes below for why the count moved and why raising it further would not help)*.
 
 - **Pass:** 0.50 lies inside the central 95% interval of the empirical null distribution of permuted AUCs.
 - **Fail:** 0.50 falls outside that interval. That indicates label information reachable through row structure rather than field values, which T4 then localises.
@@ -663,6 +698,12 @@ An oracle that looked up labels would trivially score 1.0 and measure nothing. T
 | Event-level ROC-AUC, all attack types | **>= 0.85** | Below this the joint pattern is too weak to be worth detecting. |
 | Card-testing burst recall @ precision 0.80 | **>= 0.90** | Card testing is a strong, high-volume pattern. An oracle that cannot find 9 in 10 burst events has been denied the structure. |
 | Ring member recall @ precision 0.70, **scored at the account level** | **>= 0.60** | Rings are genuinely harder, low-rate and interleaved. A lower floor is honest, not a concession. |
+
+> **This floor is NOT met, and it ships that way. Recorded here so the table is not read as a claim of success.**
+>
+> The structure oracle reaches **0.4400** against this 0.60 floor. The ceiling is set by how many ring members actually share a device, drawn per ring from `RING_DEVICE_SUBSET = (0.30, 0.60)` and observed at 40% in the run that measured it. **Raising that range would clear the floor and was refused**: a ring in which every member transacts from one device is not a realistic ring. Members deliberately use separate accounts and separate instruments, and partial sloppiness is the realistic case and the thing that makes the pattern hard. Buying the number by making the world less true is the failure mode section 4 exists to prevent.
+>
+> The shipped ring detector reaches PR AUC **0.5820** and recall **0.5556 at precision 1.0000**, so it is above the oracle's 0.4400 and still below 0.60. Full record in `docs/report/decisions.md`, 2026-08-28 and 2026-08-30.
 
 > **Unit corrected 2026-08-28. Ring is scored per account; card testing stays per event.**
 >

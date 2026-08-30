@@ -1,6 +1,13 @@
 # Event Record Schema — Coordination Detector (Track 02)
 
-**Status:** design only. No generator, no detector, no code.
+**Status:** **superseded in part, and kept as written.** This was a design
+document, produced before any code existed. The generator, four detectors, a
+decision layer, a streaming runtime and a reproducibility pipeline were all
+built afterwards, and measurement contradicted several claims below. Those are
+**corrected in place and marked**, never silently edited, so the reasoning that
+led to a wrong call stays readable next to what replaced it. Where this document
+and `generator-spec.md` §6 disagree about which fields exist, **§6 is
+authoritative**: it records the field cut this document predates.
 **Grounded in:** [`api-shapes/`](api-shapes/) (real test-mode captures, 2026-08-28) and the API probe findings, which are kept in a private working note and deliberately not published.
 
 ## Scope and stated assumptions
@@ -29,12 +36,14 @@ Keeping the outcome store physically separate is what makes "we did not plant th
 
 Modelled on the **single-fetch** representation of Razorpay's payment entity, not the list representation. The probe found these disagree (see Deviations §4).
 
+> **Six fields below are marked CUT.** They were specified here, then removed by the field cut in `generator-spec.md` §6 before any data was generated, and **no dataset has ever contained them**: `entity`, `card.sub_type`, `error_description`, `acquirer_data`, `ip_prefix`, `user_agent_hash`. Each is left in place with its original justification and the reason it was cut, because two of the cuts, `acquirer_data` and `ip_prefix`, are among the better calls in the project and the argument is only legible next to what it replaced. The generator asserts their absence: `CUT_FIELDS` in `src/generator/emit.py`.
+
 ### Envelope
 
 | Field | Type | Why it is here |
 |---|---|---|
 | `id` | `string` | `pay_` + 14 base62 chars, matching the observed `order_TUyazxwv5PmVvf` / `cust_TUycL7Df2L6nrf` format. **Must be monotonic with `created_at`** — every ID captured in the probe shared a time-ordered prefix (`TUya…`, `TUyb…`, `TUyc…` within one minute). Random IDs would be both unrealistic and, if fraud rows were minted in a separate block, an ordering leak. |
-| `entity` | `string` | Constant `"payment"`. Real Razorpay records carry it; cheap fidelity. |
+| `entity` | `string` | **CUT, see generator-spec.md §6.** A constant field carries no information. Kept here only because byte-fidelity to Razorpay's shape might have been wanted for a published sample; it was not. Original reason: constant `"payment"`, real Razorpay records carry it, cheap fidelity. |
 | `created_at` | `integer` | Unix **seconds**, never ISO strings, never milliseconds. Every captured timestamp was integer seconds. This is the axis both detectors run on: bursts are density in `created_at`, and any train/test split must be chronological on it. |
 | `order_id` | `string \| null` | `order_` + 14. Links attempts to one checkout. Multiple attempts against one `order_id` is the honest signal for retry-hammering, and it is genuinely null for some flows. |
 
@@ -57,7 +66,7 @@ Modelled on the **single-fetch** representation of Razorpay's payment entity, no
 | `card.network` | `string` | `Visa`, `MasterCard`, `RuPay`, `Diners`, `Amex`. |
 | `card.type` | `string` | `debit` / `credit`. |
 | `card.issuer` | `string \| null` | Bank code. The downtime feed uses the same vocabulary (`BKID`, `PUNB`, `CNRB`), so codes should come from that set. |
-| `card.sub_type` | `string` | `consumer` / `business`. |
+| `card.sub_type` | `string` | **CUT, see generator-spec.md §6.** Near-constant in practice, so it adds a column and no signal. Original: `consumer` / `business`. |
 | `vpa` | `string \| null` | Populated when `method:"upi"`, format `local@handle`. **The handle is a weak link and the local part is a strong one** — millions legitimately share `@okhdfcbank`, but `@kotak811` appeared as a real handle in the downtime feed. Store whole; let the detector decide how to split. |
 | `bank` | `string \| null` | Netbanking bank code. |
 | `wallet` | `string \| null` | Wallet provider. |
@@ -75,11 +84,11 @@ Modelled on the **single-fetch** representation of Razorpay's payment entity, no
 |---|---|---|
 | `status` | `string` | Restricted to `created` / `authorized` / `failed`. **`captured` and `refunded` are excluded** — those are later merchant actions. |
 | `error_code` | `string \| null` | Documented values e.g. `BAD_REQUEST_ERROR`, `GATEWAY_ERROR`. |
-| `error_description` | `string \| null` | Human text. |
+| `error_description` | `string \| null` | **CUT, see generator-spec.md §6.** Free text is the easiest place for an accidental tell to appear: if the generator templates descriptions and attack rows draw from even a slightly different pool, the string becomes the label. It carries nothing `error_code` and `error_reason` do not. Original: human text. |
 | `error_source` | `string \| null` | Documented: `customer`, `business`, `gateway`, `internal`. The probe observed `business`, `internal` and `gateway` in live errors. |
 | `error_step` | `string \| null` | e.g. `payment_authentication`, `payment_initiation` (both observed). |
 | `error_reason` | `string \| null` | e.g. `payment_cancelled`, `input_validation_failed`. **The decline-reason mix is the core card-testing signal** — a CVV walk shows as a concentrated `INCORRECT_CVV`-class reason against one IIN. |
-| `acquirer_data` | `object` | `{auth_code: string\|null}`. Non-null iff approved, so it partly mirrors `status`; kept for fidelity, flagged as redundant. |
+| `acquirer_data` | `object` | **CUT, see generator-spec.md §6.** Worse than the redundancy this row already flagged: `auth_code` is non-null **exactly** when the attempt is approved, making it a perfect proxy for `status`. Any model would receive `status` twice, inflating apparent feature importance and making the single-feature test unreadable. Original: `{auth_code: string\|null}`, kept for fidelity, flagged as redundant. |
 
 ### `notes`
 
@@ -95,8 +104,8 @@ Razorpay's payment entity carries **no device, IP, session or address data**. A 
 |---|---|---|
 | `account_id` | `string \| null` | Merchant-side customer account. Null for guest checkout. |
 | `device_id` | `string \| null` | Checkout SDK fingerprint. |
-| `ip_prefix` | `string` | **/24 only, not the full address.** The /24 is the actual linking unit for a bot pool, and truncating avoids storing a personal identifier for no analytic gain. |
-| `user_agent_hash` | `string` | Hashed, not raw. Exact-collision linking without a fingerprinting surface. |
+| `ip_prefix` | `string` | **CUT, see generator-spec.md §6.** **The clearest cut of the six, and the reasoning is worth keeping.** Jio, Airtel, BSNL and ACT all place subscribers behind carrier-grade NAT, and Indian mobile broadband is almost always CGNAT'd, so **two unrelated users sharing a /24 is unremarkable**. Worse, no citable subscribers-per-address figure could be found, so the benign collision rate for the attribute that most needed a real one would have been invented. Cutting it beat fabricating its calibration. Original: /24 only, never the full address, since the /24 is the linking unit for a bot pool and truncating avoids storing a personal identifier for no analytic gain. |
+| `user_agent_hash` | `string` | **CUT, see generator-spec.md §6.** Near-collinear with `device_id` by construction, so carrying both means calibrating two correlated benign rates instead of one. Original: hashed, not raw, giving exact-collision linking without a fingerprinting surface. |
 | `session_id` | `string` | Groups attempts within one checkout visit. |
 | `attempt_seq` | `integer` | Nth attempt in this session. Retry-hammering signal, knowable at attempt. |
 | `checkout_ms` | `integer` | Milliseconds on the checkout page before submit. Bots are fast, but so are returning customers with saved cards — see the leak warning below. |
@@ -113,7 +122,7 @@ Coordination detection is a graph problem: events are nodes, a shared attribute 
 |---|---|---|
 | `card.iin` | **Strong** | A BIN walk tests many cards from one issuer range. Everything else about the card varies; the IIN does not. |
 | `merchant_context.device_id` | **Strong** | One machine driving many "customers". |
-| `merchant_context.ip_prefix` | **Medium** | A bot pool sits in a few /24s. Weakened by carrier-grade NAT, which is very common in India. |
+| `merchant_context.ip_prefix` | ~~**Medium**~~ **CUT** | **CUT, see generator-spec.md §6.** Rated Medium here and **cut entirely** after the CGNAT problem was followed through: near-universal carrier-grade NAT on Indian mobile makes a shared /24 close to uninformative, and no subscribers-per-address figure exists to calibrate the benign rate against. Left in the table because the reasoning from Medium to cut is the useful part. Original: a bot pool sits in a few /24s, weakened by carrier-grade NAT, which is very common in India. |
 | `merchant_context.shipping_pincode` | **Medium** | Reshipping rings converge on drop addresses. |
 | `email` (domain, and local-part shape) | **Medium** | Disposable-domain reuse, or generated local parts sharing a pattern. |
 | `contact` | **Medium** | Number-block reuse. Weakened by the normalisation inconsistency noted above. |
@@ -168,7 +177,7 @@ Not rejected, because they are legitimately available at attempt time and a real
 | `merchant_context.checkout_ms` | If only fraud is fast, speed is the label. Returning customers with saved cards are also fast; slow, confused fraudsters exist. |
 | `account_age_days` | If every fraud account is new and every legit account is old, this one integer solves the task. Stolen and aged accounts must appear on the fraud side, brand-new accounts on the legit side. |
 | `amount` | If ₹1–20 appears only in attacks, the amount threshold is the label. Legitimate micro-transactions must exist. |
-| `error_reason` | If declines only ever happen to fraud, the decline flag is the label. Legitimate payments fail constantly, which is the entire premise of Track 03. |
+| `error_reason` | If declines only ever happen to fraud, the decline flag is the label. Legitimate payments fail constantly, which is the entire premise of the payments-reliability problem. *(Corrected 2026-08-30: this read "Track 03". We are Track 02. The point stands; the track number was wrong.)* |
 | `created_at` | If fraud is bursty and legit traffic is smooth Poisson, arrival density is the label. Legitimate traffic has flash sales, paydays and 8pm peaks. |
 | `notes` | **The most likely accidental leak in the whole record.** Generator metadata (seed, archetype, persona, row index) written into `notes` is a total giveaway, and it is easy to do by accident — the probe's own captured order carries `notes:{"probe":"buildathon-capability-check"}`. Must be scrubbed or held to merchant-realistic content. |
 
