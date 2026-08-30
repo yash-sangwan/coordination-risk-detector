@@ -240,3 +240,25 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 - **What it costs:** 1,264 events/sec, 0.791 ms per event with all four detectors scored. Stated plainly as a limitation rather than presented as a design target. For this merchant, roughly 1.4 events/minute average and about 40/minute at burst peak, it is three orders of magnitude of headroom, so the constant factor buys nothing worth the risk.
 - **One boundary detail that would have broken equality:** eviction is `ts < cutoff`, strictly less than. `bisect_left` includes an event sitting exactly on the window boundary, so evicting on `<=` would have dropped one event on exact timestamp ties and produced a small, rare, hard-to-find divergence. It is called out in the code because it is the kind of thing that looks like a rounding difference and is not.
 
+---
+
+### 2026-08-30 — One pipeline, and results.json is the only place numbers come from
+
+- **Chose:** a single entry point, `make evaluate` / `python -m pipeline.evaluate`, that regenerates every dataset from seed, runs all eight acceptance tests at all six grades, all four detectors, the ring detector, the cost model and the streaming check, and writes `results/results.json`.
+- **How "no number typed by hand" is enforced rather than promised:** `pipeline/cite.py` renders a document containing `{{key}}` placeholders against `results.json` and **raises on an unknown key**. A figure that does not exist in the artifact cannot be written, and a figure whose value moved is picked up on the next render. The rule is enforced by the renderer failing, not by anyone remembering it.
+- **Split into two files, deliberately.** `results.json` holds only numbers and must be byte identical between runs. `run_meta.json` holds the git commit, seeds, config, package versions and per-stage timings, which change every run. Mixing them would have made byte-identity impossible to check, which is the same mistake as putting a timestamp in a build artifact.
+- **Threads pinned to 1** (`OMP_NUM_THREADS` and friends, set before numpy or sklearn is imported, recorded in `run_meta.json`). Multi-threaded float reduction reorders summation and can move the last bits of a gradient-boosting score. This is a pipeline setting, not a model change, and it is what makes byte-identity achievable at all.
+- **Parsers fail loudly.** Every stage's output is parsed by a strict parser that raises if a table moves or a heading is renamed, because a silent mis-parse would put a wrong number into `results.json` and from there into a document. Raw stage output is archived under `results/logs/` regardless.
+
+---
+
+### 2026-08-30 — The committed datasets were stale, and the pipeline is what surfaced it
+
+- **What the pipeline found on its first run:** regenerating from seed produced `events.jsonl` with hash `cfcc11dd...`, against the committed `data/sample` at `b5e9e998...`. The datasets on disk were **not** what the current generator produces.
+- **Why:** the household fix from earlier the same day. `population.py` was corrected so household members share a pincode as well as a device, and that fix was explicitly recorded as **not applied to any committed dataset** because regenerating would have invalidated the evasive sweep. The pipeline regenerates from source by construction, so it applies the fix.
+- **What actually moved, measured rather than assumed:**
+  - The **72 card-testing and evasive-sweep metrics are unchanged**, verified element by element against the pre-pipeline reference. Card testing never touches `shipping_pincode`, so a change to benign pincodes cannot reach it.
+  - **T3 passes at every grade**, confirming the +0.18% pair-collision prediction made when the fix was written.
+  - The **ring detector moves from 0.5811 to 0.5820** PR AUC. That is the useful result: the scoring-time counterfactual patch, applied because we would not regenerate, approximates the real generator fix to within 0.0009.
+- **What this means going forward:** `results/` is now the source of truth and it is generated from the current source, so this class of drift cannot recur silently. The committed `data/` remains gitignored and is a cache, not a record.
+

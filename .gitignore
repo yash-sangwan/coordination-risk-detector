@@ -3,3 +3,4 @@ notes/
 data/
 __pycache__/
 *.pyc
+results/logs/

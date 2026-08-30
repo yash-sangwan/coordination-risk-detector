@@ -404,3 +404,33 @@ Identical to the replay numbers, which is the point: latency is now a property o
 
 **The 72 card-testing and evasive-sweep metrics were re-run and are unchanged.**
 
+---
+
+### 2026-08-30 — Reproducibility pipeline
+
+**Command.** `make evaluate`, or `python -m pipeline.evaluate`. `make verify` runs it twice and requires byte-identical `results.json`.
+
+**Artifacts.** `results/results.json` (every number, machine readable), `results/run_meta.json` (provenance and timings), `results/summary.md` (the same numbers, readable), `results/pr_auc_vs_decline.png` (the central curve), `results/logs/` (raw stage output, gitignored).
+
+**Provenance recorded with every run:** git commit and subject, whether the tree was dirty, seed 42, 30 days, 40,000 actors, the six grades, python 3.13.5, package versions, the pinned thread environment, and the sha256 of `results.json` itself.
+
+**Wall time 112.3 min.** What dominates:
+
+| stage | minutes | share |
+|---|---|---|
+| streaming equivalence | 51.2 | 45.6% |
+| cost model | 15.9 | 14.1% |
+| generation, 6 datasets | 0.0 | 0.0% |
+| acceptance, 6 grades | 42.5 | 37.9% |
+| ring detector | 1.4 | 1.3% |
+| detector sweep | 1.2 | 1.1% |
+
+Streaming dominates, and for a known reason: it re-streams the whole file six times, once for equivalence and five times for the memory profile at different lengths, at 0.791 ms per event. The cost stage is second because it sweeps ~160 candidate thresholds per detector per grade. Neither is worth optimising while the whole run fits inside an hour. Stage times vary with machine load: the cost stage took 15.9 min on one run and 17.9 min on another with no code change, so treat the total as approximate.
+
+**Determinism check: PASSED, after the check itself found a defect. See below..**
+
+**The 72 card-testing and evasive-sweep metrics produced by the pipeline are identical to the pre-pipeline reference**, compared element by element.
+
+**Determinism, in full.** Run 1 `0a1499c5...`, run 2 `c070d551...`, mismatch. Diffed key by key: **630 of 632 leaf values byte identical**; the two that moved were streaming throughput, 453.0 against 553.0 events/sec, a stopwatch reading misfiled into the results file. Moved to `run_meta.json`. Both artifacts under the corrected schema hash to **`a99decec1e636f9acbec185929d441609b6b9a003ff52c0ea6e3891dbfcf498b`** and are byte identical. See [what-broke.md](what-broke.md), 2026-08-30.
+
+**Second-run timings, same code, for the variance record:** total 112.3 min against 53.8 min. Streaming 51.2 against 21.5, cost 15.9 against 6.3, acceptance about 7 min per grade against about 3.2. Nothing changed but machine load, which is why no timing figure is treated as a result.
