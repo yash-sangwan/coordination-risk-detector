@@ -244,18 +244,15 @@ def _pred_shared_device(rng, scale=None):
     return 0.999
 
 
-def _p_benign_row_unique(lam):
-    """P(a benign ROW carries an identifier seen exactly once), before collisions.
-
-    AUC is computed over ROWS, not accounts. Rows from an actor with N events all
-    carry frequency N, so a many-event actor contributes many high-frequency rows
-    while a one-event actor contributes a single freq-1 row. Row weighting is
-    therefore P(N=1)/E[N], which for Poisson(lam) reduces to exp(-lam).
-
-    The previous version returned the ACCOUNT-weighted quantity 1 - P(N=1|N>=1),
-    a different number entirely: 0.34 against a true row-weighted 0.15.
-    """
-    return math.exp(-lam)
+# `_p_benign_row_unique(lam) -> exp(-lam)` lived here until 2026-08-30. It was a
+# closed form for the row-weighted probability that a benign row carries a
+# unique identifier, written to replace an account-weighted version that gave
+# 0.34 against a true 0.15. It was then superseded, not reverted: _simulate_identity
+# below stopped scoring a freq==1 indicator and started scoring the simulated
+# FREQUENCY directly, which is what the encoder actually does, and row weighting
+# falls out of building `benign` as one entry per row rather than per actor. The
+# formula had no caller after that and has been deleted. Row weighting is still
+# in force; it is structural now rather than a term.
 
 
 def _lam_events_per_actor(scale):

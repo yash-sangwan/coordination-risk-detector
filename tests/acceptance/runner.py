@@ -234,7 +234,26 @@ def t3(events, lab):
 
     doms = [e["email"].split("@")[1] for e in ben]
     contact_rate = account_share_rate(ap(ben, lambda e: e["contact"]))
-    vpa_target = contact_rate * 0.92 ** 2 * 0.72
+    # Spec 4: the vpa target is DERIVED, never a constant. Three factors, and it
+    # matters which of them can be read from config and which cannot.
+    #
+    #   contact_rate            observed on this run, not assumed
+    #   VPA_FROM_PHONE_SHARE^2  read from config. Was a 0.92 literal until
+    #                           2026-08-30, which is precisely the silent break
+    #                           spec 4 says it recorded the dependency to stop:
+    #                           changing the constant moved the generator but
+    #                           left this target where it was.
+    #   UPI_RETENTION           stays a literal. It is a MEASURED emergent
+    #                           statistic, not a declared parameter: 74.4% of
+    #                           transacting accounts make at least one UPI
+    #                           payment in a 30-day window, and the retention on
+    #                           this statistic is 0.718. Nothing in config equals
+    #                           it, so there is nothing to reference. It does
+    #                           depend on METHOD_MIX["upi"] and the purchase
+    #                           rates in ACTOR_CLASSES, so if either changes this
+    #                           has to be re-measured rather than carried over.
+    UPI_RETENTION = 0.72
+    vpa_target = contact_rate * C.VPA_FROM_PHONE_SHARE ** 2 * UPI_RETENTION
 
     checks = [
         ("card.iin", pair_collision([e["card"]["iin"] for e in ben if e.get("card")]),
