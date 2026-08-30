@@ -1,6 +1,6 @@
 """Row assembly and the two-store split.
 
-The event record follows notes/event-schema.md with the section 6 field cuts
+The event record follows docs/event-schema.md with the section 6 field cuts
 applied. Cut and therefore never generated: acquirer_data, error_description,
 user_agent_hash, ip_prefix, card.sub_type, entity.
 

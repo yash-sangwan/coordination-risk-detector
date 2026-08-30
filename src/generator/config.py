@@ -1,6 +1,6 @@
 """Generator constants.
 
-Every number here traces to a section of notes/generator-spec.md. Where the spec
+Every number here traces to a section of docs/generator-spec.md. Where the spec
 gives a citable figure it is marked CITED; where the spec marks it an assumption
 it is marked ASSUMPTION. Where two spec numbers cannot both hold, the conflict is
 named in SPEC_CONFLICTS and the resolution is explicit, never silent.

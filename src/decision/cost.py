@@ -2,14 +2,14 @@
 
 Every parameter below carries one of three tags and there are no others:
 
-  CITED       a published figure, with its source, verified in notes/
+  CITED       a published figure, with its source, verified in the spec
   MEASURED    computed from our own generated stream, never invented
   ASSUMPTION  a number we chose, with the reasoning that produced it
 
 The asymmetry this whole layer exists to respect is cited: **"For every Rs 100
 saved by preventing fraud, brands lose Rs 400-600 to falsely declined legitimate
 orders"** (Razorpay, payment success rate optimization, verified 2026-08-28 and
-recorded in notes/generator-spec.md section 3). A 4x to 6x penalty against
+recorded in docs/generator-spec.md section 3). A 4x to 6x penalty against
 over-blocking is the reason this system never declines anyone: see
 src/decision/policy.py, where the most severe available action is a reversible
 hold rather than a decline.
