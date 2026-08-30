@@ -170,16 +170,25 @@ def streaming(text):
     out["alerts"] = {"batch": int(m.group(1)), "stream": int(m.group(2)),
                      "identical": m.group(3) == "True"}
 
-    mem = _section(text, "BOUNDED STATE", "THROUGHPUT", "memory")
-    for line in mem.splitlines():
-        m = re.match(r"\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(\d+)\s+([\d.]+)\s*$", line)
-        if m:
-            out["memory"].append({"events": int(m.group(1)),
-                                  "peak_kib": float(m.group(2)),
-                                  "max_window_events": int(m.group(3)),
-                                  "alerts": int(m.group(4))})
-    if len(out["memory"]) < 3:
-        raise ParseError("memory profile rows missing")
+    # The memory profile is opt in and normally absent: it re-streams the file
+    # five times and is a one-off demonstration, not a correctness check. When
+    # present it is parsed; when absent that is expected, not an error. It has
+    # its own artifact, results/memory_profile.json, written by `make
+    # memory-profile`.
+    if "BOUNDED STATE" in text:
+        mem = _section(text, "BOUNDED STATE", "THROUGHPUT", "memory")
+        for line in mem.splitlines():
+            m = re.match(r"\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(\d+)\s+([\d.]+)\s*$",
+                         line)
+            if m:
+                out["memory"].append({"events": int(m.group(1)),
+                                      "peak_kib": float(m.group(2)),
+                                      "max_window_events": int(m.group(3)),
+                                      "alerts": int(m.group(4))})
+        if len(out["memory"]) < 3:
+            raise ParseError("memory profile present but rows missing")
+    else:
+        out.pop("memory")
 
     m = re.search(r"([\d,]+) events in ([\d.]+)s = ([\d,]+) events/sec", text)
     if not m:

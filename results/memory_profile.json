@@ -1,0 +1,36 @@
+{
+  "memory": [
+    {
+      "alerts": 0,
+      "events": 2000,
+      "max_window_events": 67,
+      "peak_kib": 243.8
+    },
+    {
+      "alerts": 258,
+      "events": 8000,
+      "max_window_events": 67,
+      "peak_kib": 576.4
+    },
+    {
+      "alerts": 258,
+      "events": 20000,
+      "max_window_events": 67,
+      "peak_kib": 576.4
+    },
+    {
+      "alerts": 2003,
+      "events": 40000,
+      "max_window_events": 160,
+      "peak_kib": 954.4
+    },
+    {
+      "alerts": 3890,
+      "events": 67961,
+      "max_window_events": 160,
+      "peak_kib": 949.3
+    }
+  ],
+  "schema": 1,
+  "throughput_note": "timing lives in run_meta.json"
+}

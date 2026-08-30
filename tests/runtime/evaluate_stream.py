@@ -159,7 +159,7 @@ def latency_compare(events, lab, alerts, cut):
     return rows
 
 
-def main(path):
+def main(path, with_memory=False):
     P = freeze(path)
     events, batch, cut, y, lab, mf = batch_reference(path, P)
     ids = [e["id"] for e in events]
@@ -226,8 +226,14 @@ def main(path):
     print("  The streaming numbers above are measured as events arrive, so they")
     print("  are a property of the runtime rather than of a replay loop.")
 
-    memory_profile(path, P, thresholds, cals, p_auth, detector,
-                   [2000, 8000, 20000, 40000, len(events)])
+    if with_memory:
+        memory_profile(path, P, thresholds, cals, p_auth, detector,
+                       [2000, 8000, 20000, 40000, len(events)])
+    else:
+        print("
+  (memory profile skipped: it re-streams the file five more")
+        print("   times and is a one-off demonstration that state is bounded,")
+        print("   not a correctness check. Run `make memory-profile` for it.)")
     throughput(path, P, thresholds, cals, p_auth, detector)
 
     print("\n" + "=" * 92)
@@ -237,5 +243,11 @@ def main(path):
 
 
 if __name__ == "__main__":
-    ok = main(sys.argv[1] if len(sys.argv) > 1 else "data/sample")
+    # The memory profile is opt in. It re-streams the file five times to show
+    # state is bounded, which is a one-off demonstration rather than something
+    # every verification run needs. The equivalence check above is a correctness
+    # check and always runs.
+    argv = [a for a in sys.argv[1:] if a != "--memory"]
+    ok = main(argv[0] if argv else "data/sample",
+              with_memory="--memory" in sys.argv)
     sys.exit(0 if ok else 1)

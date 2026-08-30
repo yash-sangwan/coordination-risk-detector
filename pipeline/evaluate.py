@@ -94,6 +94,9 @@ def main():
                     help="skip generation and use the datasets already on disk")
     ap.add_argument("--verify", action="store_true",
                     help="run twice and require byte-identical results.json")
+    ap.add_argument("--memory-profile", action="store_true",
+                    help="run ONLY the bounded-state memory profile and write "
+                         "results/memory_profile.json")
     ap.add_argument("--from-logs", action="store_true",
                     help="rebuild results.json from results/logs/ without "
                          "re-running any stage. For a parser or schema change.")
@@ -103,6 +106,9 @@ def main():
     t_start = time.time()
     timings = {}
     results = {"schema": 1}
+
+    if args.memory_profile:
+        return memory_profile()
 
     if args.from_logs:
         return rebuild_from_logs()
@@ -136,6 +142,10 @@ def main():
     results["cost"] = parsers.cost_model(out)
 
     print("\n== 6/6 streaming equivalence ==", flush=True)
+    # Equivalence only. The memory profile is its own target: it re-streams the
+    # file five more times, which was 61% of the events this stage touched and
+    # about 40% of the whole pipeline, to re-demonstrate something that does not
+    # change between runs.
     out = sh(["python", "-m", "tests.runtime.evaluate_stream", "data/sample"],
              "06_streaming", timings)
     results["streaming"] = parsers.streaming(out)
@@ -191,6 +201,31 @@ def main():
     return 0
 
 
+def memory_profile():
+    """The bounded-state demonstration, on its own. Writes its own artifact.
+
+    Split out on 2026-08-30 because it re-streams the file five times to show
+    something that is a property of the design rather than of a given run. It is
+    not a correctness check; the equivalence check in the main pipeline is, and
+    that stays there.
+    """
+    timings = {}
+    print("== memory profile (bounded state demonstration) ==", flush=True)
+    out = sh(["python", "-m", "tests.runtime.evaluate_stream", "data/sample",
+              "--memory"], "07_memory_profile", timings)
+    parsed = parsers.streaming(out)
+    payload = json.dumps({"schema": 1, "memory": parsed["memory"],
+                          "throughput_note": "timing lives in run_meta.json"},
+                         indent=2, sort_keys=True) + NL
+    os.makedirs(RESULTS, exist_ok=True)
+    with open(os.path.join(RESULTS, "memory_profile.json"), "w",
+              encoding="utf-8", newline=NL) as fh:
+        fh.write(payload)
+    print(f"wrote results/memory_profile.json ({len(parsed['memory'])} rows, "
+          f"{timings['07_memory_profile']/60:.1f} min)")
+    return 0
+
+
 def rebuild_from_logs():
     """Re-parse archived stage output. Changes no measurement, only the schema."""
     def rd(name):
@@ -206,6 +241,19 @@ def rebuild_from_logs():
     results["cost"] = parsers.cost_model(rd("05_cost"))
     results["streaming"] = parsers.streaming(rd("06_streaming"))
     perf = _split_perf(results)
+
+    # The archived log predates the split and still carries the memory profile.
+    # Move it to its own artifact so a rebuild produces exactly what a fresh run
+    # now produces. This relocates a measurement; it does not recompute one.
+    memory = results["streaming"].pop("memory", None)
+    if memory is not None:
+        with open(os.path.join(RESULTS, "memory_profile.json"), "w",
+                  encoding="utf-8", newline=NL) as fh:
+            fh.write(json.dumps({"schema": 1, "memory": memory,
+                                 "throughput_note":
+                                     "timing lives in run_meta.json"},
+                                indent=2, sort_keys=True) + NL)
+        print(f"moved {len(memory)} memory rows to results/memory_profile.json")
 
     payload = json.dumps(results, indent=2, sort_keys=True) + NL
     with open(os.path.join(RESULTS, "results.json"), "w", encoding="utf-8",

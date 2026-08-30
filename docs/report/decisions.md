@@ -262,3 +262,25 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
   - The **ring detector moves from 0.5811 to 0.5820** PR AUC. That is the useful result: the scoring-time counterfactual patch, applied because we would not regenerate, approximates the real generator fix to within 0.0009.
 - **What this means going forward:** `results/` is now the source of truth and it is generated from the current source, so this class of drift cannot recur silently. The committed `data/` remains gitignored and is a cache, not a record.
 
+---
+
+### 2026-08-30 — Memory profile split out of the main pipeline run
+
+- **Chose:** `make memory-profile` as its own target, writing `results/memory_profile.json`. The streaming **equivalence** check stays in `make evaluate`.
+- **Why:** the profile re-streams the file five times, at 2,000 / 8,000 / 20,000 / 40,000 / 67,961 events. That is **137,961 of the 225,922 events** the streaming stage touched, 61% of the stage and roughly 40% of the whole pipeline, spent re-demonstrating that peak memory tracks the event rate and not the stream length. That is a property of the design; it does not change between runs.
+- **What stays and why:** equivalence is a **correctness** check. It asserts the streaming path reproduces batch scores exactly, which can break with any change to a detector or the window logic, so it runs every time.
+- **Expected effect, estimated not measured:** the stage keeps 87,961 of 225,922 events, **38.9%** of its current work. On the clean 53.8 min run the stage was 21.5 min, so about 8 to 10 min, giving roughly **40 to 43 min total, about 20 to 25% faster**. Under load it was 51.2 min of 112.3, so roughly **80 to 85 min**. The saving is estimated slightly conservatively because the profile re-streams from the file start each time, where windows are smaller and the per-event cost is at or below average. Not confirmed by a run.
+- **`results.json` is identical apart from the moved key**, confirmed against the archived stage log rather than by a fresh run: parsing it with and without the memory section gives `['memory']` as the only key that differs and every other key byte identical. The committed artifact was migrated with `make from-logs`, which relocates the measurement without recomputing anything.
+
+---
+
+### 2026-08-30 — The household fix is now measured, not estimated
+
+- **What changed:** the fix is still not applied to any committed dataset, but the pipeline regenerates from seed, so its cost is now a measurement instead of a prediction.
+- **The drift the pipeline surfaced:** regenerating gives `events.jsonl` at `cfcc11dd...` against the committed `data/sample` at `b5e9e998...`. The committed data predates the fix, exactly as recorded when we chose not to regenerate.
+- **Measured cost, against what was predicted:**
+  - **72 metrics unchanged.** Predicted, because card testing never reads `shipping_pincode`.
+  - **T3 passes at every one of the six grades.** Predicted at +0.18% on the pair-collision target, well inside the +/-20% band.
+  - **Ring moves 0.5811 to 0.5820** PR AUC.
+- **The useful number is the last one.** The scoring-time counterfactual patch, adopted because regenerating would have cost the evasive sweep, **approximated the real generator fix to within 0.0009**. The decision to patch rather than regenerate is now supported by a measurement rather than an argument.
+

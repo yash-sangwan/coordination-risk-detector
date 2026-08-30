@@ -1,6 +1,7 @@
 """Readable summary and the one chart, both generated from results.json."""
 
 import json
+import os
 
 GRADES = ("v=0.00", "v=0.25", "v=0.50", "v=0.75", "v=0.90", "v=1.00")
 DETECTORS = ("baseline 1: rolling volume", "baseline 2: rolling decline",
@@ -94,10 +95,24 @@ def write_summary(results, meta, path):
           f"events/sec, {perf['streaming.throughput_ms_per_event']:.3f} ms per "
           f"event. Measured, not reproducible: it moves with machine load, "
           f"which is why it is recorded in `run_meta.json` and not here.\n")
-    a("| events | peak KiB | max window events |")
-    a("|---|---|---|")
-    for m in s["memory"]:
-        a(f"| {m['events']:,} | {m['peak_kib']:.1f} | {m['max_window_events']} |")
+    # The bounded-state profile has its own artifact and its own target, since
+    # it re-streams the file five times to demonstrate something that does not
+    # change between runs. Read it if it is there, say where it comes from if not.
+    mem = s.get("memory")
+    if mem is None:
+        mp = os.path.join(os.path.dirname(path), "memory_profile.json")
+        if os.path.exists(mp):
+            with open(mp, encoding="utf-8") as fh:
+                mem = json.load(fh).get("memory")
+    if mem:
+        a("Bounded state, from `make memory-profile`:\n")
+        a("| events | peak KiB | max window events |")
+        a("|---|---|---|")
+        for m in mem:
+            a(f"| {m['events']:,} | {m['peak_kib']:.1f} | "
+              f"{m['max_window_events']} |")
+    else:
+        a("Bounded-state profile not in this run. Run `make memory-profile`.")
     a("")
 
     a("## Acceptance tests\n")
