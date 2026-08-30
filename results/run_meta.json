@@ -20,8 +20,8 @@
     "scipy": "1.15.3"
   },
   "performance": {
-    "streaming.throughput_events_per_sec": 553.0,
-    "streaming.throughput_ms_per_event": 1.808
+    "streaming.throughput_events_per_sec": 976.0,
+    "streaming.throughput_ms_per_event": 1.025
   },
   "python": "3.13.5",
   "rebuilt_from_logs": true,

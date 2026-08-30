@@ -67,7 +67,7 @@ Reproduces batch exactly: **True**. Alerts batch 3890, stream 3890, identical Tr
 | baseline 3: combined | 67,961 | 0 | 0 |
 | GRAPH: fanout vs overlap | 67,961 | 0 | 0 |
 
-Throughput 553 events/sec, 1.808 ms per event. Measured, not reproducible: it moves with machine load, which is why it is recorded in `run_meta.json` and not here.
+Throughput 976 events/sec, 1.025 ms per event. Measured, not reproducible: it moves with machine load, which is why it is recorded in `run_meta.json` and not here.
 
 Bounded state, from `make memory-profile`:
 

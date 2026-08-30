@@ -434,3 +434,38 @@ Streaming dominates, and for a known reason: it re-streams the whole file six ti
 **Determinism, in full.** Run 1 `0a1499c5...`, run 2 `c070d551...`, mismatch. Diffed key by key: **630 of 632 leaf values byte identical**; the two that moved were streaming throughput, 453.0 against 553.0 events/sec, a stopwatch reading misfiled into the results file. Moved to `run_meta.json`. Both artifacts under the corrected schema hash to **`a99decec1e636f9acbec185929d441609b6b9a003ff52c0ea6e3891dbfcf498b`** and are byte identical. See [what-broke.md](what-broke.md), 2026-08-30.
 
 **Second-run timings, same code, for the variance record:** total 112.3 min against 53.8 min. Streaming 51.2 against 21.5, cost 15.9 against 6.3, acceptance about 7 min per grade against about 3.2. Nothing changed but machine load, which is why no timing figure is treated as a result.
+
+---
+
+### 2026-08-30 — Pipeline speed after the split, measured
+
+**Command.** `python -m pipeline.evaluate`, full run including regeneration from seed.
+
+**54.4 min total**, against **112.3 min** for the same pipeline on the same machine before the split. **52% faster.** Stage breakdown:
+
+| stage | minutes | share |
+|---|---|---|
+| generate 6 datasets from seed | 10.8 | 19.9% |
+| acceptance, 6 grades | 31.1 | 57.2% |
+| cost model | 6.2 | 11.4% |
+| streaming equivalence | 5.0 | 9.2% |
+| ring detector | 0.7 | 1.3% |
+| detector sweep | 0.6 | 1.1% |
+
+**The estimate was wrong, in the conservative direction.** Predicted 8 to 20 min for the streaming stage and 46 to 58 min total on this machine. Measured **5.0 min** and 54.4 min. The total landed inside the range; the stage did not.
+
+**Why, and it is worth knowing.** The estimate modelled cost as proportional to events streamed: the stage kept 87,961 of 225,922 events, so 38.9% of the work. That model was wrong because the memory profile's cost was not dominated by streaming at all.
+
+| | events | pure streaming work at 1.808 ms/event | measured |
+|---|---|---|---|
+| old stage | 225,922 | 6.8 min | 21.5 min clean, 51.2 loaded |
+| new stage | 87,961 | 2.7 min | 5.0 min |
+
+The old stage spent **14.7 to 44.4 minutes** on something other than streaming, and that something is `tracemalloc`, which instruments every allocation and was active for five of the six passes. The new stage's 5.0 min is 2.7 min of streaming plus about 2.3 min of `freeze()` and batch reference scoring, which reconciles. **Removing the memory profile removed instrumentation overhead, not just events**, which is why the saving was 90% of the stage rather than the 61% predicted.
+
+**Determinism, third confirmation and the strongest one.** `results.json` sha256 **`554aa31a84a6f060bf9827a691db9027498cd2668cbacf9fce21aa250cd332d2`**, byte identical to the artifact produced by the previous run, and predicted from the archived log before this run happened. Unlike the earlier `--verify`, this run **regenerated all six datasets from seed** rather than reusing them, so generation is now inside the reproducibility guarantee rather than delegated to T7.
+
+Unchanged in this run: 72 metrics present, streaming exact `True`, alerts batch 3,890 / stream 3,890 identical, graph 0.9451 at v=1.00, decline 0.2887, ring 0.5820.
+
+**Correction to the previous entry.** It stated stages 1 to 5 took 38.0 min on this machine. The correct sum is **49.4 min**; 38.0 dropped the generation and cost stages. The conclusion drawn from it, that this machine runs slower than the clean baseline, still holds: 49.4 against 32.3.
+
