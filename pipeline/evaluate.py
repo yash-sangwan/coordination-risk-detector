@@ -94,6 +94,10 @@ def main():
                     help="skip generation and use the datasets already on disk")
     ap.add_argument("--verify", action="store_true",
                     help="run twice and require byte-identical results.json")
+    ap.add_argument("--stage", metavar="NAME",
+                    help="re-run ONE stage and archive its log, then stop. For "
+                         "recovering from a single stage failure without "
+                         "repeating the whole run. Follow with --from-logs.")
     ap.add_argument("--memory-profile", action="store_true",
                     help="run ONLY the bounded-state memory profile and write "
                          "results/memory_profile.json")
@@ -106,6 +110,9 @@ def main():
     t_start = time.time()
     timings = {}
     results = {"schema": 1}
+
+    if args.stage:
+        return run_one_stage(args.stage)
 
     if args.memory_profile:
         return memory_profile()
@@ -198,6 +205,37 @@ def main():
 
     if args.verify:
         verify(digest, timings)
+    return 0
+
+
+STAGES = {
+    "01_generate": ["-m", "src.generator.sweep", "--seed", str(SEED),
+                    "--days", str(DAYS), "--actors", str(ACTORS),
+                    "--out", "data/evasive"],
+    "03_detector_sweep": ["-m", "tests.detector.evaluate_sweep", "data/evasive"],
+    "04_ring": ["-m", "tests.detector.evaluate_ring", "data/sample"],
+    "05_cost": ["-m", "tests.decision.evaluate_cost", "data/evasive"],
+    "06_streaming": ["-m", "tests.runtime.evaluate_stream", "data/sample"],
+}
+for _v in GRADES:
+    STAGES["02_acceptance_v%03d" % round(_v * 100)] = [
+        "-m", "tests.acceptance.runner", "data/evasive/v%03d" % round(_v * 100)]
+
+
+def run_one_stage(name):
+    """Re-run a single stage into results/logs/, then stop.
+
+    Exists because a stage failing should not cost a whole pipeline run. The
+    other stages' archived logs are still valid, so `--from-logs` reassembles
+    results.json afterwards without recomputing them.
+    """
+    if name not in STAGES:
+        raise SystemExit(f"unknown stage {name!r}. Known: {sorted(STAGES)}")
+    timings = {}
+    sh(["python"] + STAGES[name], name, timings)
+    print(f"archived results/logs/{name}.txt "
+          f"({timings[name]/60:.1f} min). Now run: "
+          f"python -m pipeline.evaluate --from-logs")
     return 0
 
 

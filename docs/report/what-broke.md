@@ -203,3 +203,15 @@ The ring pattern's defining structure is that its members share a drop address a
 - **How we fixed it:** throughput moved to `run_meta.json`, where wall time and stage timings already live. The split was always meant to be numbers on one side and measurements-of-the-machine on the other; throughput was misfiled. Verified without paying for a third two-hour run: both existing artifacts, re-canonicalised with the two keys removed, hash to `a99decec1e636f9a...` and are byte identical.
 - **The part worth remembering:** the check earned its keep on its first real use, and what it caught was **our own artifact design**, not a model defect. A reproducibility check that only ever passes has not been tested. This one failed, the failure was cheap to diagnose because the artifact is structured, and the thing it found was a category error we would otherwise have shipped: a performance measurement presented as a result.
 
+---
+
+### 2026-08-30 — Shipped a syntax error and verified it with an import that could not see it
+
+- **What broke:** `make evaluate` crashed at stage 6 of 6 with `SyntaxError: unterminated string literal` in `tests/runtime/evaluate_stream.py`, after 39 minutes of compute had already run.
+- **What was actually wrong:** a `print("
+  ...")` written through an unquoted shell heredoc, where the escape collapsed into a real newline and split the string across two lines. **The same mistake had been made and fixed in `pipeline/evaluate.py` less than an hour earlier.**
+- **Why the check missed it:** it was verified with `python -c "import pipeline.evaluate"`. That imports the pipeline, which references the streaming harness only as a *subprocess argument string*, so the broken module was never loaded. The check passed and proved nothing about the file that had just been edited.
+- **How we fixed it:** the string is repaired, and verification is now `python -m compileall src tests pipeline` plus an import of every module found by `pkgutil.walk_packages`. A file that has been edited is compiled, not assumed.
+- **Recovery, and the second lesson:** the run was not wasted. Stages 1 to 5 had already archived their logs and all of them still parse, so only stage 6 needed repeating. That is now a supported path, `--stage 06_streaming` followed by `--from-logs`, rather than something to reconstruct by hand each time.
+- **The part worth remembering:** a verification that cannot fail is worse than none, because it converts an unchecked edit into a checked-looking one. The import proved the pipeline imports; the thing that had changed was a subprocess entry point, which no import reaches. **Check the artifact you edited, not the one that calls it.**
+

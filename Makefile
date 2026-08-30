@@ -18,6 +18,9 @@ reuse:
 # re-streams the file five times to show peak memory tracks the event rate and
 # not the stream length, which does not change between runs, so it is a one-off
 # rather than part of every verification. Writes results/memory_profile.json.
+# Re-run one stage after a failure, then rebuild: 
+#   python -m pipeline.evaluate --stage 06_streaming
+#   python -m pipeline.evaluate --from-logs
 memory-profile:
 	python -m pipeline.evaluate --memory-profile
 

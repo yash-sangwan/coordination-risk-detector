@@ -230,8 +230,7 @@ def main(path, with_memory=False):
         memory_profile(path, P, thresholds, cals, p_auth, detector,
                        [2000, 8000, 20000, 40000, len(events)])
     else:
-        print("
-  (memory profile skipped: it re-streams the file five more")
+        print("\n  (memory profile skipped: it re-streams the file five more")
         print("   times and is a one-off demonstration that state is bounded,")
         print("   not a correctness check. Run `make memory-profile` for it.)")
     throughput(path, P, thresholds, cals, p_auth, detector)
