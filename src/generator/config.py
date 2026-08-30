@@ -339,10 +339,13 @@ ISSUERS = [
 IIN_PRIMARY_SHARE = 0.80               # intra-issuer split, keeps sum(p^2) in range
 IIN_TARGET_RANGE = (0.08, 0.15)        # spec 4
 
-DEVICE_SHARE_RATE = 0.072              # assigned rate. Only ~62% of actors transact in a
-                                       # 30-day window, so both members of a household are
-                                       # both observed less often than they are assigned.
-                                       # This lands the OBSERVED rate on the spec 4 target of 6%.
+DEVICE_SHARE_RATE = 0.072              # ASSIGNED rate, not the observed one. Only ~62% of
+                                       # actors transact in a 30-day window, so a household
+                                       # is observed as sharing less often than it was
+                                       # assigned. This lands the OBSERVED rate on the
+                                       # spec 4 target of 6%. Derivation and the rule for
+                                       # re-deriving it at another scale are in spec 4,
+                                       # "Assigned rate against observed rate".
 DEVICE_HOUSEHOLD_SIZE = (2, 3)
 
 # The probe found real Razorpay data normalises phone numbers inconsistently:
@@ -353,8 +356,11 @@ DEVICE_HOUSEHOLD_SIZE = (2, 3)
 # string, so sharing pairs still match exactly.
 CONTACT_PLUS91_SHARE = 0.35            # ASSUMPTION
 
-CONTACT_SHARE_RATE = 0.025             # assigned rate, same observability correction.
-                                       # Lands observed on the spec 4 target of 1.5%.
+CONTACT_SHARE_RATE = 0.025             # ASSIGNED rate, same observability correction, but
+                                       # a larger one: a shared phone is assigned strictly
+                                       # pairwise and needs both members observed, where a
+                                       # household of 2-3 survives on any two. Lands observed
+                                       # on the spec 4 target of 1.5%. See spec 4.
 
 # vpa local part is derived from the phone for most actors, so it inherits the
 # phone collision rate rather than being tuned independently (spec 4 mechanism).

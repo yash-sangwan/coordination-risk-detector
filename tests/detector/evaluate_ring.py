@@ -15,6 +15,7 @@ import sys
 import numpy as np
 from sklearn.metrics import average_precision_score, precision_recall_curve
 
+from src.generator import config as C
 from src.detector.baselines import score_pincode_sharing
 from src.detector.ring import (SCORE_MODES, account_attributes,
                                conjunction_components, score_accounts,
@@ -42,21 +43,28 @@ RING_SCORE_MODE = "raw"
 
 
 def patch_households(events):
-    """Counterfactual: give every shared-device account group a common pincode.
+    """Give every shared-device account group a common pincode.
 
-    src/generator/population.py builds households by copying ONLY the device id
-    between members, so two people modelled as sharing a home live at two
-    different postcodes. That makes "shares a pincode AND shares a device" close
-    to a pure label, and any precision measured against it is a property of the
-    generator rather than of a detector.
+    **This is now a no-op, and that is the correct state.** It is kept as a
+    regression guard, not as an active correction.
 
-    This repairs that at scoring time so the detector can be measured against a
-    population where households behave physically, WITHOUT regenerating the
-    datasets and invalidating every number already recorded.
+    History. population.py once built households by copying only the device id,
+    so two people modelled as sharing a home lived at two different postcodes.
+    That left "shares a pincode AND shares a device" with almost no benign
+    population, making it close to a pure ring label. Regenerating was refused at
+    the time because it would have invalidated the evasive sweep, so this
+    function stood in for the generator fix at scoring time. The pipeline
+    regenerates from seed, so its first run applied the real fix, and households
+    have shared an address ever since. There is nothing left here to repair.
+
+    Why it stays. Running it costs one pass over the events and gives the two
+    column comparison in main(), whose delta should now be +0.0000 everywhere.
+    If the generator ever loses the shared address again, that delta stops being
+    zero. It is the cheapest alarm available for a defect whose only symptom
+    last time was a detector quietly beating its own oracle.
 
     It uses no labels. "Accounts observed on one device" is visible in the event
-    stream, and the patch is applied to every such group, ring and benign alike.
-    Ring members already share their drop pincode, so for them it is a no-op.
+    stream, and it is applied to every such group, ring and benign alike.
     """
     from src.detector.ring import _invert
     pins, devs, _, _ = account_attributes(events)
@@ -372,8 +380,11 @@ def run(events, manifest, lab, tag, note):
 
     print("\n  ORACLE CEILING FOR CONTEXT")
     print("    T8 records the structure oracle at recall 0.4400 @ precision 0.70,")
-    print("    against a T8 floor of 0.60. The ceiling is set by the 40% device")
-    print("    sharing rate, which we chose not to inflate.")
+    print("    against a T8 floor of 0.60. The ceiling is set by how many ring")
+    print("    members actually share a device, which is drawn per ring from")
+    print(f"    RING_DEVICE_SUBSET = {C.RING_DEVICE_SUBSET} and was OBSERVED at 40%")
+    print("    in the run that first measured this ceiling. It is an outcome of")
+    print("    that range, not a constant, and we chose not to inflate the range.")
 
     for r in rows:
         pr_curve(r["name"], r["y"], r["s"])
@@ -499,11 +510,23 @@ def main(path):
     for x, y in zip(a, b):
         print(f"  {x['name']:<36} {x['ap']:>14.4f} {y['ap']:>18.4f} "
               f"{y['ap']-x['ap']:>+9.4f}")
-    print("\n  The left column is not a detection result. In the generated")
-    print("  population a benign household shares a device but lives at two")
-    print("  different postcodes, so the conjunction has almost no benign")
-    print("  population to compete with and its precision is a property of the")
-    print("  generator. The right column is the one to quote.")
+    print("\n  BOTH COLUMNS ARE NOW THE SAME POPULATION, and the delta above")
+    print("  should read +0.0000 throughout. That is the expected result, not a")
+    print("  bug: population.py now gives household members a shared address, so")
+    print("  patch_households finds nothing left to repair and is a no-op.")
+    print()
+    print("  History, because the columns are otherwise puzzling. Households")
+    print("  once shared a device but not a pincode, which left the conjunction")
+    print("  with almost no benign population to compete with and inflated this")
+    print("  detector to PR AUC 0.9291. We would not regenerate at the time,")
+    print("  because that would have invalidated the evasive sweep, so the right")
+    print("  column was a label-free counterfactual standing in for the real")
+    print("  fix. The pipeline later regenerated from seed and the fix landed.")
+    print()
+    print("  The comparison is kept as a REGRESSION GUARD. If the generator ever")
+    print("  loses the shared address again, these two columns separate and this")
+    print("  delta stops being zero, which is the cheapest available alarm for a")
+    print("  defect that took a detector beating its own oracle to notice.")
 
 
 if __name__ == "__main__":

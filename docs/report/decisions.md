@@ -156,12 +156,19 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 
 ### 2026-08-30 — Patched the household defect at scoring time rather than regenerating
 
+> **RESOLVED 2026-08-30, and the decision held.** The reasoning below is unchanged and the outcome vindicated it: we declined to regenerate in order to protect the evasive sweep, and the pipeline regenerated from seed anyway on its first run, so the real fix landed without anyone paying for it deliberately. The scoring-time patch had approximated it **to within 0.0009**. Everything below describes the interim state and should be read in past tense.
+
 - **Chose:** fix `population.py` so household members share a pincode as well as a device, but **do not regenerate any dataset**. The ring numbers on record come from a label-free equivalent patch applied at scoring time in `tests/detector/evaluate_ring.py`.
 - **Rejected:** regenerating `data/sample` and the six `data/evasive` steps so the fix is present in the data.
 - **Why:** cost, and specifically what the cost falls on. Regenerating changes `events.jsonl`, which invalidates **every card testing number and the entire evasive sweep**. That sweep is the central result of the project: it is what showed the decline baseline collapsing from 0.9583 to 0.2887 PR AUC while the graph detector held 0.9451 with bit-identical scores, and it is the only evidence we have that the graph detector is worth anything. Regenerating would cost about 12 minutes of generation plus roughly 40 minutes of acceptance re-runs plus a re-score of four detectors across six grades, and every test split scored once would have to be scored again. Trading the central result to improve a supporting one, days from the deadline, is the wrong way round.
 - **Why the patch is legitimate:** it is **label free**. It gives every account group observed on a shared device a common pincode, and "accounts seen on one device" is visible in the event stream. It reads no sealed record. It is applied uniformly to ring and benign groups alike, and it is a no-op for ring members, who already share their drop address. It cannot flatter the detector: it can only add benign competition that was missing.
 - **What is true of the code:** the generator fix is **real and committed**, not a comment. `population.py` now copies the pincode alongside the device id, with the defect, its measurement and the regeneration cost recorded at the site. Anyone who regenerates gets a correct population without having to rediscover any of this. T3 is expected to survive it: the change adds 2.700e-06 to a 0.001468 pair-collision target, +0.18%, far inside the +/-20% band, though it should be rechecked rather than assumed.
 - **What we report:** the **patched** numbers. Ring detector PR AUC **0.5753**, recall **0.5556 at precision 1.0000**. The unpatched 0.9291 appears beside them only as the artefact it is, never as a result. Every ring figure in numbers.md is the patched one and is labelled as such.
+  - *Superseded, 2026-08-30.* **The current ring PR AUC is 0.5820.** Three values appear across this log and each was correct when written, so reading top down without this note gives a stale number:
+    - **0.5753** — this entry. Scoring-time patch, `min_pin_population = 4` selected by an implicit tie-break.
+    - **0.5811** — after the tie-break was made explicit and selected `min_pin_population = 6`. Still the scoring-time patch, still pre-fix data.
+    - **0.5820** — current. Same detector and same parameters as 0.5811; the only change is that the data is now regenerated with the household fix applied, so the patch is a no-op. The 0.0009 gap between the last two is the measured accuracy of the patch.
+  - The 0.9291 remains an artefact and is never a result, which is unchanged.
 
 ---
 
@@ -283,4 +290,15 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
   - **T3 passes at every one of the six grades.** Predicted at +0.18% on the pair-collision target, well inside the +/-20% band.
   - **Ring moves 0.5811 to 0.5820** PR AUC.
 - **The useful number is the last one.** The scoring-time counterfactual patch, adopted because regenerating would have cost the evasive sweep, **approximated the real generator fix to within 0.0009**. The decision to patch rather than regenerate is now supported by a measurement rather than an argument.
+
+---
+
+### 2026-08-30 — Household story closed, and the counterfactual kept as a guard
+
+- **Status:** resolved. The two earlier entries stay as the record and are marked resolved in place.
+- **What the code says now:** `population.py` no longer claims the fix is unapplied, because it is applied. `evaluate_ring.py` no longer explains a defect the scored data does not have; it states plainly that **both columns are now the same population** and that the delta should read `+0.0000` throughout.
+- **Why the two-column comparison stays:** as a **regression guard**, not an active correction. If the generator ever loses the shared household address again, the delta stops being zero. That is the cheapest alarm available for a defect whose only symptom last time was a detector quietly beating its own oracle by more than double, which no test in the suite was looking for.
+- **Also corrected:** the printed oracle-ceiling line hardcoded "the 40% device sharing rate" as though 40% were a constant. It is an **observed outcome** of `RING_DEVICE_SUBSET = (0.30, 0.60)`, drawn per ring. The line now cites the range from config and labels 40% as observed in the run that first measured the ceiling.
+- **Also moved into the spec:** the assigned-versus-observed correction for `DEVICE_SHARE_RATE` (0.072) and `CONTACT_SHARE_RATE` (0.025). Both are calibration constants chosen so the **observed** rate lands on section 4's 6% and 1.5%, because a collision is only visible when both members transact and only ~62% of actors do. That reasoning lived only in code comments, so a reader comparing spec to config saw an unexplained mismatch. It is now in section 4 beside the targets, with the rule that both must be re-derived if the window, actor count or purchase rates change.
+- **Noted, no action:** `notes/event-schema.md` is sometimes referred to as `docs/event-schema.md`. It lives under `notes/`, which is gitignored, and stays there until we decide what goes public.
 

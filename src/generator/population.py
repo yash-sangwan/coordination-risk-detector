@@ -233,19 +233,25 @@ def build_population(rng, n_actors: int, window_start: int, window_end: int):
     # conjunction close to a pure ring label and inflated the ring detector from
     # PR AUC 0.5753 to 0.9291. See docs/report/what-broke.md, 2026-08-30.
     #
-    # NOT APPLIED TO ANY COMMITTED DATASET. data/sample and every data/evasive
-    # step were generated before this fix and still carry the defect. Applying it
-    # means regenerating, which changes events.jsonl and therefore invalidates
-    # every card testing number and the whole evasive sweep, which is the central
-    # result. The ring numbers on record instead come from a label-free
-    # equivalent patch applied at scoring time in tests/detector/evaluate_ring.py.
-    # This code is the real fix, here for whoever regenerates next.
+    # APPLIED, as of the first full pipeline run on 2026-08-30. It was written
+    # earlier the same day and deliberately NOT applied, because regenerating
+    # would have invalidated the evasive sweep, so the ring numbers of that
+    # moment came from a label-free equivalent patch at scoring time in
+    # tests/detector/evaluate_ring.py. The pipeline regenerates from seed by
+    # construction, so the first run picked this up and every dataset on disk is
+    # now post-fix. The scoring-time patch is consequently a no-op and is kept
+    # only as a guard, see the note in evaluate_ring.py.
     #
-    # T3 should survive it. Concentrating ~2,880 actors into ~1,152 households
-    # adds k(k-1) per household to sum(n_p^2), which is 2.700e-06 against the
-    # 0.001468 analytic pair-collision target, a +0.18% relative change and far
-    # inside T3's +/-20% band. Recheck rather than assume, but no retune of
-    # PINCODE_PAIR_COLLISION_ANALYTIC is expected.
+    # Measured cost of that detour, rather than estimated: the 72 card testing
+    # metrics were unchanged, since card testing never reads shipping_pincode;
+    # T3 passed at all six grades; and the ring detector moved 0.5811 to 0.5820.
+    # So the scoring-time patch had approximated this fix to within 0.0009.
+    #
+    # T3 survives it, as predicted. Concentrating ~2,880 actors into ~1,152
+    # households adds k(k-1) per household to sum(n_p^2), which is 2.700e-06
+    # against the 0.001468 analytic pair-collision target, a +0.18% relative
+    # change and far inside T3's +/-20% band. No retune of
+    # PINCODE_PAIR_COLLISION_ANALYTIC was needed.
     n_share = int(round(C.DEVICE_SHARE_RATE * n_actors))
     idxs = rng.sample(range(n_actors), n_share) if n_share else []
     j = 0

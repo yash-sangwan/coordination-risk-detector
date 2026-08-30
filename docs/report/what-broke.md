@@ -145,6 +145,8 @@ Recorded in api-probe.md (private working doc) §4. Consequence tracked in the p
 
 ### 2026-08-30 — Households shared a device but not an address, and that was a planted answer
 
+> **RESOLVED 2026-08-30.** Kept in full below because it is the record of what happened. The fix is now applied: the pipeline regenerates from seed, so its first run picked up the corrected `population.py` and every dataset on disk is post-fix. The scoring-time patch has become a no-op and is retained only as a regression guard. **Measured cost of the whole detour: 0.0009.** The patch had put the ring detector at 0.5811; the real fix puts it at 0.5820. The 72 card testing metrics were unchanged and T3 passed at all six grades, both as predicted.
+
 **The most consequential defect in the project so far.** It did not add a signal to the attack. It removed one from the benign population, which is harder to see and does the same damage.
 
 **What broke.** The ring detector, scored at the account level on the test split, returned **precision 0.9444, recall 0.9444, PR AUC 0.9291**. The structure oracle for the same pattern reaches **0.4400**, and the oracle is allowed to read the sealed store at configuration time. A detector built from the event stream alone had apparently beaten a label-informed oracle by more than double.
