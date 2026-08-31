@@ -218,3 +218,37 @@ The ring pattern's defining structure is that its members share a drop address a
 - **Recovery, and the second lesson:** the run was not wasted. Stages 1 to 5 had already archived their logs and all of them still parse, so only stage 6 needed repeating. That is now a supported path, `--stage 06_streaming` followed by `--from-logs`, rather than something to reconstruct by hand each time.
 - **The part worth remembering:** a verification that cannot fail is worse than none, because it converts an unchecked edit into a checked-looking one. The import proved the pipeline imports; the thing that had changed was a subprocess entry point, which no import reaches. **Check the artifact you edited, not the one that calls it.**
 
+---
+
+### 2026-08-30 — The same defect was inflating the oracle we built to check the detector, and that we did not catch
+
+**The second half of the household story, and the more uncomfortable half.** The entry above records catching the defect because the detector's number was better than it had any right to be. The same defect was inflating the **reference we were checking it against**, and nothing caught that. We fixed the detector, never re-established the reference on corrected data, and went on quoting a ceiling that had stopped existing.
+
+**What broke.** After the corrected data landed, the structure oracle's ring recall @ precision 0.70 read **0.0000**, against the **0.4400** recorded in the spec, in `decisions.md` and printed by the ring harness. The published documents asserted a ceiling the artifact contradicted.
+
+**What we thought was wrong.** That the oracle's rule was merely weaker than the detector's on the corrected population, i.e. a broken fixture. That turned out to be the *consequence*, not the cause.
+
+**What was actually wrong.** The oracle's dominant term is the pincode-and-device conjunction, and before the household fix that conjunction had **zero benign instances across 25,834 accounts**:
+
+| | conjunction components | benign | ring |
+|---|---|---|---|
+| pre-fix | **3** | **0** | 3 |
+| post-fix | 559 | 556 | 3 |
+
+Every conjunction in the entire pre-fix stream was a ring. It was not a hard signal the oracle had found; it was a pure label. Post-fix, rings are **0.54%** of conjunctions and the oracle's recall goes **0.4400 → 0.0000**.
+
+**The oracle never had ring signal independent of the defect.** Disabling the conjunction term, against a base rate of 0.0010:
+
+| | full rule | conjunction disabled |
+|---|---|---|
+| pre-fix | PR AUC 0.4409 | **0.0011** |
+| post-fix | PR AUC 0.0703 | **0.0010** |
+
+Chance, on both populations. The remaining three terms, pincode cluster size, device peers and shared contact, contribute nothing measurable. **The entire 0.4400 was the artefact.**
+
+**How we fixed it.** We did not. The T8 ring leg is now recorded as **unbounded**: we do not know how much ring signal is recoverable from this stream, only that the oracle's family of rules cannot find it on a correct population. Giving the oracle the detector's population gate would have produced a number, and that number would have measured our approach rather than the achievable signal, so it was refused.
+
+**What did not change.** The ring detector's result never depended on the oracle: **PR AUC 0.5820, recall 0.5556 at precision 1.0000**, against a pincode baseline of **0.0037**, from a held-out split scored once. It stands exactly as reported.
+
+**The part worth remembering.** We built the oracle so that a detector could not quietly grade its own homework, and then let the oracle be graded by the same defective world. A reference is only a reference if it is re-established when the thing it measures changes, and **the fix that repaired the detector silently invalidated the fixture, with no test looking at the relationship between them.** The detector's suspiciously good number was investigated within minutes. The oracle's suspiciously bad one sat in a committed artifact for a full day, because a fixture reading low looks like the world being hard rather than like a bug.
+

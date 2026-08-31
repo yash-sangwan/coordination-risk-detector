@@ -122,6 +122,8 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 
 ### 2026-08-28 — Ring ships without clearing its T8 floor, as a measured limitation
 
+> **OBSOLETE 2026-08-30. Kept as the record; do not quote the numbers below.** The 0.44 "ceiling" was not a ceiling. It was the oracle reading the household defect, and it stopped existing when the generator was fixed. The oracle's ring recall is now **0.0000**, it never had ring signal independent of that defect, and the T8 ring leg is recorded as **unbounded** rather than as a floor we miss. The reasoning about `RING_DEVICE_SUBSET` below is still sound as a decision about realism; the number it was attached to is not. See "The oracle was reading the same defect" in `what-broke.md`, and the entry dated 2026-08-30 below.
+
 - **Chose:** Ship the ring pattern with its ceiling stated. Account-level recall is **0.44 against a 0.60 floor**, and the cause is that only **40% of ring members share a device**, which is exactly where recall saturates.
 - **Rejected:** Raising `RING_DEVICE_SUBSET` to clear the floor.
 - **Why:** A ring in which every member transacts from one device is not a realistic ring. Members deliberately use separate accounts and separate instruments; partial device sloppiness is the realistic case, and it is what makes the pattern hard. Raising the sharing rate would buy the number by making the world less true, which is the failure mode section 4 exists to prevent. The floor is a target we did not hit, not a threshold to move.
@@ -311,4 +313,21 @@ Sources: [A10 Networks on CGNAT](https://www.a10networks.com/glossary/what-is-ca
 - **T3's `email` ratio leg: recorded, not changed.** Its §4 unit is top-3 domain share, a concentration measure, so a ratio of it would sit near 1.0 whatever the attack did and would test nothing. Pair collision on the domain is the informative measure and is what the code uses. **Chose to document the exception in spec T3** rather than make the code match a rule that produces a useless statistic. The band leg still uses top-3 share, so the §4 target is untouched, and the other five attributes use their own unit in both legs.
 - **Dead code removed.** `_p_benign_row_unique` had no caller. It was superseded when `_simulate_identity` began scoring simulated frequency directly; row weighting now comes from building the benign sample one entry per row rather than from a closed form. `what-broke.md` named that function as the fix, so it described something that did not run. The entry is corrected in place: the finding and its numbers stand, the mechanism description was wrong. All five affected predictors verified unchanged against the last run: `contact` 0.9223, `card.last4` 0.8728, `vpa` 0.7741, `mc.device_id` 0.9990.
 - **Ring constants written down.** All nine now appear in spec 2.2 with their values and tags. §2.2 stays brief and no reasoning was invented; the table records what the code does. `RING_DEVICE_SUBSET` is flagged as a **range drawn per ring**, with 40% noted as the observed value in the run that set the T8 ceiling rather than as the parameter.
+
+---
+
+### 2026-08-30 — The ring detector's population gate is the whole reason it survived the fix
+
+- **Measured.** Same corrected data, same unit, the only change being the gate:
+
+| configuration | PR AUC | recall @ P>=0.90 |
+|---|---|---|
+| detector, `min_pin_population = 6` | **0.7308** | **0.72** |
+| detector, gate removed (`= 0`) | 0.1001 | 0.0000 |
+| structure oracle, which has no such gate | 0.0703 | 0.0000 |
+
+- **Remove the gate and the detector lands at the oracle's level.** 0.1001 against 0.0703. The gate is not a tuning refinement, it is the difference between working and not working on a population where households share an address.
+- **Why it matters.** Benign conjunction components are households: size 2, median 2, and the dangerous ones sit alone on a small pincode where density is 1.0. A household of two on a pincode of two scores `k^2/n = 2.00`. A ring of four on a pincode of eight scores **exactly 2.00** as well. Tied. The gate at 6 removes the small pure clusters and leaves the rings clear.
+- **The gate exists by accident of process, and that is worth recording.** It was added on 2026-08-30 only because the scoring-time counterfactual patch forced the issue: patching households into a realistic population made the detector rank households above rings, which is what exposed the flaw in `component_size x density`. Without that patch the gate would not exist, and the detector would have failed the household fix exactly as the oracle did.
+- **We did not copy the gate into the oracle.** An oracle carrying the detector's design decisions measures our approach rather than the achievable signal, so the number it produced could not be called a ceiling. See the T8 note in `docs/generator-spec.md` and the `what-broke.md` entry of the same date.
 

@@ -2,11 +2,16 @@
 
     python -m tests.detector.diagnose_ring data/sample
 
-The detector scores 0.9444 precision against an oracle ceiling of 0.4400. A
-detector beating the informed oracle by that margin is a claim to disbelieve
-first and verify second, so this checks the obvious explanation: that "shares a
-pincode AND shares a device" has almost no benign occurrence in the generated
-population, which would make it close to a pure label rather than a hard signal.
+Written 2026-08-30, when the detector scored 0.9444 precision against what was
+then believed to be an oracle ceiling of 0.4400. A detector beating an informed
+oracle by that margin is a claim to disbelieve first and verify second, so this
+checks the obvious explanation: that "shares a pincode AND shares a device" has
+almost no benign occurrence in the generated population, which would make it
+close to a pure label rather than a hard signal.
+
+It did. And the same defect was inflating the oracle: that 0.4400 was the oracle
+reading the identical artefact, and it has since been withdrawn. Both numbers in
+the paragraph above are historical. See docs/report/what-broke.md, 2026-08-30.
 
 Measures only. Changes nothing.
 """

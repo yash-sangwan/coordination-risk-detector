@@ -361,7 +361,9 @@ different run.
 T1 and T8 fail identically at **every** step of the sweep **including `v=0.00`**,
 which is byte-identical to `data/sample`. Both are the two already-recorded open
 items and neither is caused by the variant: `email` over its mechanism by +0.053
-to +0.058, and ring account-level recall at 0.4400 against a 0.60 floor. Card
+to +0.058, and the ring leg of T8, which at the time this was written read 0.4400
+against a 0.60 floor and now reads **0.0000 and is unbounded** (see the T8 floors
+table; the 0.4400 was an artefact of the household defect). Card
 testing's own T8 floor **passes at every grade** (recall@P0.80 of 1.0000 down to
 0.9955), so the oracle's card-testing ceiling does not depend on the decline
 rate. T3 through T7 pass everywhere.
@@ -699,11 +701,19 @@ An oracle that looked up labels would trivially score 1.0 and measure nothing. T
 | Card-testing burst recall @ precision 0.80 | **>= 0.90** | Card testing is a strong, high-volume pattern. An oracle that cannot find 9 in 10 burst events has been denied the structure. |
 | Ring member recall @ precision 0.70, **scored at the account level** | **>= 0.60** | Rings are genuinely harder, low-rate and interleaved. A lower floor is honest, not a concession. |
 
-> **This floor is NOT met, and it ships that way. Recorded here so the table is not read as a claim of success.**
+> **This leg is UNBOUNDED, not failed. Corrected 2026-08-30, and the correction matters more than the number.**
 >
-> The structure oracle reaches **0.4400** against this 0.60 floor. The ceiling is set by how many ring members actually share a device, drawn per ring from `RING_DEVICE_SUBSET = (0.30, 0.60)` and observed at 40% in the run that measured it. **Raising that range would clear the floor and was refused**: a ring in which every member transacts from one device is not a realistic ring. Members deliberately use separate accounts and separate instruments, and partial sloppiness is the realistic case and the thing that makes the pattern hard. Buying the number by making the world less true is the failure mode section 4 exists to prevent.
+> This note previously read: *"The structure oracle reaches 0.4400 against this 0.60 floor. The ceiling is set by how many ring members actually share a device, drawn per ring from `RING_DEVICE_SUBSET = (0.30, 0.60)` and observed at 40%."* **That ceiling never existed.**
 >
-> The shipped ring detector reaches PR AUC **0.5820** and recall **0.5556 at precision 1.0000**, so it is above the oracle's 0.4400 and still below 0.60. Full record in `docs/report/decisions.md`, 2026-08-28 and 2026-08-30.
+> The 0.4400 was measured on data that predated the household fix. Back then benign households shared a device but lived at two different postcodes, so the oracle's dominant term, the pincode-and-device conjunction, had **zero benign instances across 25,834 accounts**: 3 conjunction components in the whole stream, all three of them rings. It was not a hard signal the oracle had found, it was a pure label. On the corrected population there are **559 conjunctions, 556 of them benign**, and rings are **0.54%** of them. The oracle's ring recall @ P0.70 goes 0.4400 → **0.0000**.
+>
+> **The oracle never had ring signal independent of that defect.** Disable the conjunction term and it scores PR AUC **0.0011** pre-fix and **0.0010** post-fix, against a base rate of **0.0010**. Chance, on both populations. Its other three terms, pincode cluster size, device peers and shared contact, contribute nothing measurable.
+>
+> **So the honest statement is that we do not know how much ring signal is recoverable from this stream.** The oracle's family of rules cannot find it on the corrected population. That is not the same as the signal being absent, and it must not be read as one.
+>
+> **We declined to fix the oracle, deliberately.** The detector survives the same correction only because of its `min_pin_population` gate; copying that gate into the oracle would make the oracle a weaker copy of the detector, and an oracle built in the detector's image measures *our approach* rather than the achievable signal. A number produced that way should not be called a ceiling. The ring leg is therefore recorded as **unbounded** and the 0.60 floor stands unmeasured against.
+>
+> **The ring detector's own result is unaffected and never depended on the oracle.** It reaches PR AUC **0.5820** and recall **0.5556 at precision 1.0000**, against a pincode baseline of **0.0037**. Those numbers come from a held-out test split scored once and stand on their own. Full record in `docs/report/what-broke.md` and `docs/report/decisions.md`, both 2026-08-30.
 
 > **Unit corrected 2026-08-28. Ring is scored per account; card testing stays per event.**
 >

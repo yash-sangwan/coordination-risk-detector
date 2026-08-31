@@ -76,7 +76,7 @@ python -m tests.acceptance.sweep_runner data/evasive
 T1 and T8 fail identically at every step **including the control**, which is byte-identical to `data/sample`. Both are the two already-recorded open items and neither is caused by the variant:
 
 - T1: `email` exceeds its mechanism by +0.058 at v000 and +0.053 at every other step. One field, the same field, throughout.
-- T8: ring recall@P0.70 at the account level is 0.4400 against a 0.60 floor at every step. Card-testing recall@P0.80 **passes everywhere**: 1.0000, 1.0000, 1.0000, 0.9979, 0.9955, 0.9955. The oracle's card-testing ceiling does not depend on the decline rate.
+- T8: ring recall@P0.70 at the account level is 0.4400 against a 0.60 floor at every step. *(Superseded 2026-08-30: measured on pre-household-fix data. On the corrected population it is **0.0000**, and the 0.4400 was the oracle reading the household defect rather than a ceiling. The T8 ring leg is now recorded as unbounded. See what-broke.md, 2026-08-30.)* Card-testing recall@P0.80 **passes everywhere**: 1.0000, 1.0000, 1.0000, 0.9979, 0.9955, 0.9955. The oracle's card-testing ceiling does not depend on the decline rate.
 
 **T1a mechanism tracking.** The `status` and `error_*` predictors now read the run's declared list grade, so they fall with the variant instead of passing trivially. Observed stays just under predicted throughout:
 
@@ -242,7 +242,7 @@ Precision and recall at the frozen threshold are 0.0000 because the train-tuned 
 
 **Recall at fixed precision:** pincode baseline 0.0000 at every level from P>=0.30 to P>=0.90. Stage 1 only, 0.2222. **Ring detector, 0.5556 at precision up to and including 1.0000** — 10 of 18 ring accounts caught with **zero false positives**.
 
-**Where that lands.** Above the structure oracle's ceiling of 0.4400 at P0.70, below the T8 floor of 0.60. Against the pincode baseline it is 0.5556 recall at perfect precision versus 0.0000 recall at any precision above 0.0044, and 10 accounts flagged instead of 4,596.
+**Where that lands.** Above the structure oracle's ceiling of 0.4400 at P0.70, below the T8 floor of 0.60. *(Superseded 2026-08-30: **there is no oracle ceiling for rings.** The 0.4400 was an artefact of the household defect and the oracle now reads 0.0000, having never had ring signal independent of it. The ring detector's own numbers below are unaffected and never depended on the oracle. See what-broke.md, 2026-08-30.)* Against the pincode baseline it is 0.5556 recall at perfect precision versus 0.0000 recall at any precision above 0.0044, and 10 accounts flagged instead of 4,596.
 
 **Detection latency per ring**, days from the ring's first fraudulent event to its first alert, replayed daily on what was visible at the time, frozen threshold:
 
