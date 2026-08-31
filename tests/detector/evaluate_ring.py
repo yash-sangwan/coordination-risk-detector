@@ -537,6 +537,94 @@ def main(path):
     print("  delta stops being zero, which is the cheapest available alarm for a")
     print("  defect that took a detector beating its own oracle to notice.")
 
+    machine_readable(b, patched, lab)
+
+def operating_point(r, target=0.90):
+    """The real operating point at the best precision the detector reaches.
+
+    The recall-at-fixed-precision table reports recall only, which understated
+    the result: it said 'precision 0.90 or better' where the measured precision
+    is exact. This returns the point itself so the artifact carries precision,
+    threshold and the number of accounts actually flagged."""
+    prec, rec, thr = precision_recall_curve(r['y'], r['s'])
+    best = None
+    for i in range(len(rec)):
+        if prec[i] >= target:
+            t = float(thr[i]) if i < len(thr) else float('inf')
+            cand = (float(rec[i]), float(prec[i]), t)
+            if best is None or cand[0] > best[0]:
+                best = cand
+    if best is None:
+        return None
+    recall, precision, t = best
+    flagged = int((r['s'] >= t).sum())
+    tp = int(((r['s'] >= t) & (r['y'] == 1)).sum())
+    return recall, precision, t, flagged, tp, flagged - tp
+
+
+def conjunction_counts(events, lab):
+    """Conjunction components split benign against ring, on this population and
+    on a pre-household-fix counterfactual.
+
+    The counterfactual removes pincode co-location from benign shared-device
+    groups only, leaving rings theirs, which is exactly the pre-fix condition.
+    It reads labels, which is acceptable here: this is a fixture measurement,
+    not a detector."""
+    ring = ring_accounts(events, lab)
+
+    def counts(evs):
+        pins, devs, _, _ = account_attributes(evs)
+        comps, _ = conjunction_components(pins, devs)
+        benign = sum(1 for c in comps if not (c & ring))
+        return len(comps), benign, len(comps) - benign
+
+    from src.detector.ring import _invert
+    pins, devs, _, _ = account_attributes(events)
+    by_dev = _invert(devs)
+    pool = sorted({p for ps in pins.values() for p in ps})
+    reassign = {}
+    for d in sorted(by_dev):
+        acc = by_dev[d]
+        if len(acc) < 2 or (acc & ring):
+            continue
+        for i, a in enumerate(sorted(acc)):
+            if i:
+                reassign[a] = pool[hash(a) % len(pool)]
+    pre = []
+    for e in events:
+        mc = e['merchant_context']
+        a = mc['account_id']
+        if a in reassign and mc['shipping_pincode']:
+            mc2 = dict(mc)
+            mc2['shipping_pincode'] = reassign[a]
+            e = dict(e)
+            e['merchant_context'] = mc2
+        pre.append(e)
+    return counts(events), counts(pre)
+
+
+def machine_readable(rows, patched, lab):
+    """Strictly parseable restatement, so the artifact does not depend on the
+    layout of a table meant for a person."""
+    print()
+    print('=' * 88)
+    print('MACHINE READABLE')
+    print('=' * 88)
+
+    print('RING_OPERATING_POINT detector|recall|precision|threshold|flagged|tp|fp')
+    for r in rows:
+        op = operating_point(r)
+        if op is None:
+            print('RING_OP %s|NA|NA|NA|NA|NA|NA' % r['name'])
+        else:
+            print('RING_OP %s|%.4f|%.4f|%.4f|%d|%d|%d'
+                  % ((r['name'],) + op))
+
+    print('CONJUNCTION_COUNTS population|total|benign|ring')
+    post, pre = conjunction_counts(patched, lab)
+    print('CONJ_ROW post_fix|%d|%d|%d' % post)
+    print('CONJ_ROW pre_fix|%d|%d|%d' % pre)
+
 
 if __name__ == "__main__":
     main(sys.argv[1] if len(sys.argv) > 1 else "data/sample")

@@ -10,11 +10,19 @@ unknown key rather than passing it through.
 
 ## What we found
 
-For ordinary card testing, a rolling decline rate is already enough. It scores
+For ordinary card testing, a rolling decline rate is already enough. It catches a
+burst in 3 attempts and scores
 0.9583 PR AUC against our graph detector's
-0.9447, and it fires earlier. A coordination detector adds
-nothing there. We report that first because it is the result that decides whether
-the rest is worth reading.
+0.9447. It wins on every metric and fires sooner. A
+coordination detector adds nothing there. We report that first because it is the
+result that decides whether the rest is worth reading.
+
+Latency is the sharper comparison, and against the volume baseline it runs the
+other way. On the same burst, decline fires at attempt
+3, the graph at 6, and
+rolling volume not until attempt 66. Volume gets there in the end,
+which PR AUC rewards and a fraud team does not: by then the burst has been running
+2.40 minutes against the graph's 0.22.
 
 It earns its place against an attacker who controls their decline rate. Working a
 card list that has already been validated, the same attack drops the decline
@@ -59,11 +67,21 @@ byte-identical `results.json`.
 ## The negative result, in full
 
 At the easy end the decline baseline wins on every metric and fires sooner. The
-reason is structural rather than incidental: card testing fails from its very
-first attempt, so the decline rate is saturated before any coordination structure
-has accumulated. There is no window in which the graph knows something the
-decline rate does not. We expected the opposite and measured otherwise. The
-per-burst detail is in [docs/report/numbers.md](docs/report/numbers.md).
+reason is structural rather than incidental. Pooled across every burst, the
+decline rate over the first attempt alone is 100%.
+Card testing fails from the moment it starts, so the decline signal is saturated
+before any coordination structure has accumulated. There is no window in which the
+graph knows something the decline rate does not. We expected the opposite and
+measured otherwise.
+
+Latency per burst at the easy end, attempts before the first alert:
+
+| detector | burst b02 | burst b03 |
+|---|---|---|
+| rolling decline | 3 attempts, 0.12 min | 3 attempts, 0.05 min |
+| graph | 6 attempts, 0.22 min | 6 attempts, 0.15 min |
+| combined | 17 attempts, 0.58 min | 16 attempts, 0.30 min |
+| rolling volume | 66 attempts, 2.40 min | 65 attempts, 1.62 min |
 
 ## The evasion curve
 
@@ -134,10 +152,12 @@ over-blocking, so any operating point it picks is more aggressive than the
 citation would justify.
 
 Acting on an alert is bounded. Three tiers: monitor, step up authentication, hold
-for review. **There is no decline action in the code at all**, because at a 4 to
-6x penalty an outright block is a bad trade at any precision we can reach.
-Removing it from the action set is more reliable than trying to threshold it
-safely. Tier boundaries are solved from the cost model rather than chosen, and
+for review. **There is no decline action in the code at all.** We designed against
+the cited 4 to 6x penalty rather than our own 1.54x, and the two do not
+conflict: our figure is a lower bound that omits the churn the citation includes,
+so it understates what over-blocking costs. The conservative choice follows from
+either number, and from the lower one it follows with less room to spare. Removing
+decline from the action set is more reliable than trying to threshold it safely. Tier boundaries are solved from the cost model rather than chosen, and
 every alert emits a record carrying the evidence, the score, the boundary crossed
 and the cost of being wrong in each direction.
 
@@ -146,13 +166,14 @@ and the cost of being wrong in each direction.
 Rings are the opposite shape: a few real accounts sharing a drop address over
 weeks, never bursty. Scored per account on a held-out split, once.
 
-| detector | PR AUC | recall | precision |
-|---|---|---|---|
-| pincode baseline | 0.0036 | 0.9444 | 0.0037 |
-| **ring detector** | **0.5820** | see below | see below |
+| detector | PR AUC | recall | precision | accounts flagged | false positives |
+|---|---|---|---|---|---|
+| pincode baseline | 0.0036 | 0.9444 | 0.0037 | 4,591 | 4,591 |
+| **ring detector** | **0.5820** | **0.5556** | **1.0000** | 10 | **0** |
 
-The baseline reaches that recall by flagging 4,591 innocent accounts. The
-ring detector reaches recall 0.5556 at precision 0.90 or better.
+The baseline catches almost every ring member, and does it by flagging
+4,591 innocent accounts. The ring detector catches 10 of
+them by flagging 10 accounts in total, with 0 false positives.
 
 Two limits, both real:
 
@@ -180,8 +201,10 @@ reading is the household defect, which has two halves.
 **First half.** The generator built households that shared a device but not an
 address, so two people modelled as living in one home lived at two different
 postcodes. That left "shares an address and shares a device" with almost no benign
-population, and the ring detector was reading a planted label rather than a
-signal. We caught it because the number was far better than it had any right to
+population. Measured: the whole stream held 3 such groups, of which
+0 were benign. Every one was a ring, so the detector was reading a pure
+label rather than a signal. On the corrected population there are
+565, of which 562 are benign. We caught it because the number was far better than it had any right to
 be, not because a test failed. Every acceptance test passed throughout: they are
 built to catch a signal planted in the attack, and this was a signal missing from
 the benign side.

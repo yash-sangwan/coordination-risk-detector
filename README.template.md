@@ -10,11 +10,19 @@ unknown key rather than passing it through.
 
 ## What we found
 
-For ordinary card testing, a rolling decline rate is already enough. It scores
+For ordinary card testing, a rolling decline rate is already enough. It catches a
+burst in {{detector_sweep.latency."v=0.00"."baseline 2: rolling decline".b02.attempts_before_alert}} attempts and scores
 {{detector_sweep.pr_auc."baseline 2: rolling decline"."v=0.00"|.4f}} PR AUC against our graph detector's
-{{detector_sweep.pr_auc."GRAPH: fanout vs overlap"."v=0.00"|.4f}}, and it fires earlier. A coordination detector adds
-nothing there. We report that first because it is the result that decides whether
-the rest is worth reading.
+{{detector_sweep.pr_auc."GRAPH: fanout vs overlap"."v=0.00"|.4f}}. It wins on every metric and fires sooner. A
+coordination detector adds nothing there. We report that first because it is the
+result that decides whether the rest is worth reading.
+
+Latency is the sharper comparison, and against the volume baseline it runs the
+other way. On the same burst, decline fires at attempt
+{{detector_sweep.latency."v=0.00"."baseline 2: rolling decline".b02.attempts_before_alert}}, the graph at {{detector_sweep.latency."v=0.00"."GRAPH: fanout vs overlap".b02.attempts_before_alert}}, and
+rolling volume not until attempt {{detector_sweep.latency."v=0.00"."baseline 1: rolling volume".b02.attempts_before_alert}}. Volume gets there in the end,
+which PR AUC rewards and a fraud team does not: by then the burst has been running
+{{detector_sweep.latency."v=0.00"."baseline 1: rolling volume".b02.minutes|.2f}} minutes against the graph's {{detector_sweep.latency."v=0.00"."GRAPH: fanout vs overlap".b02.minutes|.2f}}.
 
 It earns its place against an attacker who controls their decline rate. Working a
 card list that has already been validated, the same attack drops the decline
@@ -59,11 +67,21 @@ byte-identical `results.json`.
 ## The negative result, in full
 
 At the easy end the decline baseline wins on every metric and fires sooner. The
-reason is structural rather than incidental: card testing fails from its very
-first attempt, so the decline rate is saturated before any coordination structure
-has accumulated. There is no window in which the graph knows something the
-decline rate does not. We expected the opposite and measured otherwise. The
-per-burst detail is in [docs/report/numbers.md](docs/report/numbers.md).
+reason is structural rather than incidental. Pooled across every burst, the
+decline rate over the first attempt alone is {{detector_sweep.decline_by_attempt."v=0.00"."k=1".decline_rate|.0%}}.
+Card testing fails from the moment it starts, so the decline signal is saturated
+before any coordination structure has accumulated. There is no window in which the
+graph knows something the decline rate does not. We expected the opposite and
+measured otherwise.
+
+Latency per burst at the easy end, attempts before the first alert:
+
+| detector | burst b02 | burst b03 |
+|---|---|---|
+| rolling decline | {{detector_sweep.latency."v=0.00"."baseline 2: rolling decline".b02.attempts_before_alert}} attempts, {{detector_sweep.latency."v=0.00"."baseline 2: rolling decline".b02.minutes|.2f}} min | {{detector_sweep.latency."v=0.00"."baseline 2: rolling decline".b03.attempts_before_alert}} attempts, {{detector_sweep.latency."v=0.00"."baseline 2: rolling decline".b03.minutes|.2f}} min |
+| graph | {{detector_sweep.latency."v=0.00"."GRAPH: fanout vs overlap".b02.attempts_before_alert}} attempts, {{detector_sweep.latency."v=0.00"."GRAPH: fanout vs overlap".b02.minutes|.2f}} min | {{detector_sweep.latency."v=0.00"."GRAPH: fanout vs overlap".b03.attempts_before_alert}} attempts, {{detector_sweep.latency."v=0.00"."GRAPH: fanout vs overlap".b03.minutes|.2f}} min |
+| combined | {{detector_sweep.latency."v=0.00"."baseline 3: combined".b02.attempts_before_alert}} attempts, {{detector_sweep.latency."v=0.00"."baseline 3: combined".b02.minutes|.2f}} min | {{detector_sweep.latency."v=0.00"."baseline 3: combined".b03.attempts_before_alert}} attempts, {{detector_sweep.latency."v=0.00"."baseline 3: combined".b03.minutes|.2f}} min |
+| rolling volume | {{detector_sweep.latency."v=0.00"."baseline 1: rolling volume".b02.attempts_before_alert}} attempts, {{detector_sweep.latency."v=0.00"."baseline 1: rolling volume".b02.minutes|.2f}} min | {{detector_sweep.latency."v=0.00"."baseline 1: rolling volume".b03.attempts_before_alert}} attempts, {{detector_sweep.latency."v=0.00"."baseline 1: rolling volume".b03.minutes|.2f}} min |
 
 ## The evasion curve
 
@@ -134,10 +152,12 @@ over-blocking, so any operating point it picks is more aggressive than the
 citation would justify.
 
 Acting on an alert is bounded. Three tiers: monitor, step up authentication, hold
-for review. **There is no decline action in the code at all**, because at a 4 to
-6x penalty an outright block is a bad trade at any precision we can reach.
-Removing it from the action set is more reliable than trying to threshold it
-safely. Tier boundaries are solved from the cost model rather than chosen, and
+for review. **There is no decline action in the code at all.** We designed against
+the cited 4 to 6x penalty rather than our own {{cost.implied_decline_ratio|.2f}}x, and the two do not
+conflict: our figure is a lower bound that omits the churn the citation includes,
+so it understates what over-blocking costs. The conservative choice follows from
+either number, and from the lower one it follows with less room to spare. Removing
+decline from the action set is more reliable than trying to threshold it safely. Tier boundaries are solved from the cost model rather than chosen, and
 every alert emits a record carrying the evidence, the score, the boundary crossed
 and the cost of being wrong in each direction.
 
@@ -146,13 +166,14 @@ and the cost of being wrong in each direction.
 Rings are the opposite shape: a few real accounts sharing a drop address over
 weeks, never bursty. Scored per account on a held-out split, once.
 
-| detector | PR AUC | recall | precision |
-|---|---|---|---|
-| pincode baseline | {{ring."pincode baseline (peers on pincode)".pr_auc|.4f}} | {{ring."pincode baseline (peers on pincode)".recall|.4f}} | {{ring."pincode baseline (peers on pincode)".precision|.4f}} |
-| **ring detector** | **{{ring."RING DETECTOR: conj + drop addr".pr_auc|.4f}}** | see below | see below |
+| detector | PR AUC | recall | precision | accounts flagged | false positives |
+|---|---|---|---|---|---|
+| pincode baseline | {{ring."pincode baseline (peers on pincode)".pr_auc|.4f}} | {{ring."pincode baseline (peers on pincode)".recall|.4f}} | {{ring."pincode baseline (peers on pincode)".precision|.4f}} | {{ring."pincode baseline (peers on pincode)".fp|,}} | {{ring."pincode baseline (peers on pincode)".fp|,}} |
+| **ring detector** | **{{ring."RING DETECTOR: conj + drop addr".pr_auc|.4f}}** | **{{ring.operating_point."RING DETECTOR: conj + drop addr".recall|.4f}}** | **{{ring.operating_point."RING DETECTOR: conj + drop addr".precision|.4f}}** | {{ring.operating_point."RING DETECTOR: conj + drop addr".flagged}} | **{{ring.operating_point."RING DETECTOR: conj + drop addr".fp}}** |
 
-The baseline reaches that recall by flagging {{ring."pincode baseline (peers on pincode)".fp|,}} innocent accounts. The
-ring detector reaches recall {{ring.recall_at_precision."0.90"|.4f}} at precision 0.90 or better.
+The baseline catches almost every ring member, and does it by flagging
+{{ring."pincode baseline (peers on pincode)".fp|,}} innocent accounts. The ring detector catches {{ring.operating_point."RING DETECTOR: conj + drop addr".tp}} of
+them by flagging {{ring.operating_point."RING DETECTOR: conj + drop addr".flagged}} accounts in total, with {{ring.operating_point."RING DETECTOR: conj + drop addr".fp}} false positives.
 
 Two limits, both real:
 
@@ -180,8 +201,10 @@ reading is the household defect, which has two halves.
 **First half.** The generator built households that shared a device but not an
 address, so two people modelled as living in one home lived at two different
 postcodes. That left "shares an address and shares a device" with almost no benign
-population, and the ring detector was reading a planted label rather than a
-signal. We caught it because the number was far better than it had any right to
+population. Measured: the whole stream held {{ring.conjunction_counts.pre_fix.total}} such groups, of which
+{{ring.conjunction_counts.pre_fix.benign}} were benign. Every one was a ring, so the detector was reading a pure
+label rather than a signal. On the corrected population there are
+{{ring.conjunction_counts.post_fix.total}}, of which {{ring.conjunction_counts.post_fix.benign}} are benign. We caught it because the number was far better than it had any right to
 be, not because a test failed. Every acceptance test passed throughout: they are
 built to catch a signal planted in the attack, and this was a signal missing from
 the benign side.

@@ -30,6 +30,7 @@ from tests.fixtures import load_events, load_manifest, labels_by_id
 
 SPLIT = 0.70
 FROZEN_FROM = 0.00
+NL_ = chr(10)   # avoids an escape in the machine-readable block
 
 
 def _load(path):
@@ -208,6 +209,7 @@ def main(root):
 
     ascii_plot(steps, dec, rows, names)
     inversion(steps, dec, rows, names)
+    machine_readable(steps, rows, names)
 
 
 def ascii_plot(steps, dec, rows, names):
@@ -245,6 +247,55 @@ def inversion(steps, dec, rows, names):
     for i, n in enumerate(names):
         print(f"  {n + ' PR(-s)':<30} " + "".join(
             f"{rows[v][i]['ap_inv']:>10.4f}" for v, _ in steps))
+
+def burst_decline_by_attempt(events, lab, ks=(1, 2, 3, 5, 10)):
+    """Pooled decline rate over the first k attempts of every burst.
+
+    Computed and stored rather than described in prose. The claim that card
+    testing is saturated from its first attempt is what makes the graph firing
+    later a structural fact rather than a tuning artefact, so k=1 has to be a
+    number in the artifact and not a sentence in a README.
+    """
+    by_burst = collections.defaultdict(list)
+    for e in events:
+        b = lab[e["id"]].get("burst_id")
+        if b:
+            by_burst[b].append(e)
+    out = []
+    for k in ks:
+        failed = total = 0
+        for b in sorted(by_burst):
+            head = by_burst[b][:k]
+            failed += sum(1 for e in head if e["status"] == "failed")
+            total += len(head)
+        out.append((k, (failed / total) if total else 0.0, total))
+    return out
+
+
+def machine_readable(steps, rows, names):
+    """Strictly parseable restatement of values computed above.
+
+    The artifact should not depend on the column layout of a table meant for a
+    person. Everything here is already computed; this block only writes it in a
+    form a parser can read without guessing at padding."""
+    print(NL_ + "=" * 100)
+    print("MACHINE READABLE")
+    print("=" * 100)
+
+    print("LATENCY_ROWS grade|detector|burst|minutes|attempts")
+    for v, _ in steps:
+        for i, n in enumerate(names):
+            for b, n_ev, mins, att, _ts in rows[v][i]["latency"]:
+                if mins is None:
+                    print("LATENCY_ROW %.2f|%s|%s|NA|NA" % (v, n, b))
+                else:
+                    print("LATENCY_ROW %.2f|%s|%s|%.4f|%d" % (v, n, b, mins, att))
+
+    print("DECLINE_BY_ATTEMPT grade|k|rate|n")
+    for v, path in steps:
+        events, mf, lb, cut, y = _load(path)
+        for k, rate, n in burst_decline_by_attempt(events, lb):
+            print("DECLINE_ROW %.2f|%d|%.6f|%d" % (v, k, rate, n))
 
 
 if __name__ == "__main__":

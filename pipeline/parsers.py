@@ -70,7 +70,7 @@ def detector_sweep(text):
             g: {"total": int(c.split("/")[0]), "in_flash_sale": int(c.split("/")[1])}
             for g, c in zip(GRADES, cells)}
 
-    inv = _section(text, "INVERSION CHECK", None, "inversion")
+    inv = _section(text, "INVERSION CHECK", "MACHINE READABLE", "inversion")
     out["roc_auc"] = {}
     for det in DETECTORS:
         m = re.search(re.escape(det) + r" ROC\s+((?:-?\d+\.\d{4}\s*){6})", inv)
@@ -78,6 +78,30 @@ def detector_sweep(text):
             raise ParseError(f"roc: no row for {det!r}")
         out["roc_auc"][det] = dict(
             zip(GRADES, [float(x) for x in m.group(1).split()]))
+
+    # Machine-readable block. Latency is what carries the negative result and
+    # the case against the volume baseline, so it has to be citable rather than
+    # only printed.
+    out["latency"] = {}
+    for m in re.finditer(r"^LATENCY_ROW ([\d.]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|\s]+)",
+                        text, re.M):
+        g = "v=%.2f" % float(m.group(1))
+        det, burst = m.group(2), m.group(3)
+        cell = (None if m.group(4) == "NA"
+                else {"minutes": float(m.group(4)),
+                      "attempts_before_alert": int(m.group(5))})
+        out["latency"].setdefault(g, {}).setdefault(det, {})[burst] = cell
+    if not out["latency"]:
+        raise ParseError("no LATENCY_ROW lines found")
+
+    out["decline_by_attempt"] = {}
+    for m in re.finditer(r"^DECLINE_ROW ([\d.]+)\|(\d+)\|([\d.]+)\|(\d+)",
+                        text, re.M):
+        g = "v=%.2f" % float(m.group(1))
+        out["decline_by_attempt"].setdefault(g, {})["k=%s" % m.group(2)] = {
+            "decline_rate": float(m.group(3)), "n_attempts": int(m.group(4))}
+    if not out["decline_by_attempt"]:
+        raise ParseError("no DECLINE_ROW lines found")
 
     # The 72 headline metrics, in a fixed order, so equality is checkable.
     out["headline_72"] = [
@@ -229,6 +253,29 @@ def ring(text):
         out[name] = {"precision": float(m.group(1)), "recall": float(m.group(2)),
                      "f1": float(m.group(3)), "pr_auc": float(m.group(4)),
                      "tp": int(m.group(5)), "fp": int(m.group(6))}
+    # The real operating point, so the artifact carries precision and the number
+    # of accounts flagged rather than only a recall level.
+    out["operating_point"] = {}
+    for m2 in re.finditer(r"^RING_OP ([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|"
+                          r"([^|]+)\|([^|]+)\|([^|\s]+)", text, re.M):
+        if m2.group(2) == "NA":
+            out["operating_point"][m2.group(1)] = None
+            continue
+        out["operating_point"][m2.group(1)] = {
+            "recall": float(m2.group(2)), "precision": float(m2.group(3)),
+            "threshold": float(m2.group(4)), "flagged": int(m2.group(5)),
+            "tp": int(m2.group(6)), "fp": int(m2.group(7))}
+    if not out["operating_point"]:
+        raise ParseError("no RING_OP lines found")
+
+    out["conjunction_counts"] = {}
+    for m2 in re.finditer(r"^CONJ_ROW (\w+)\|(\d+)\|(\d+)\|(\d+)", text, re.M):
+        out["conjunction_counts"][m2.group(1)] = {
+            "total": int(m2.group(2)), "benign": int(m2.group(3)),
+            "ring": int(m2.group(4))}
+    if len(out["conjunction_counts"]) != 2:
+        raise ParseError("expected pre_fix and post_fix CONJ_ROW lines")
+
     m = re.search(r"RING DETECTOR: conj \+ drop addr\s+((?:[\d.]+\s+){3}[\d.]+)\s*\n",
                   _section(blk, "RECALL AT FIXED PRECISION", None, "ring recall"))
     if m:
