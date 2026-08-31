@@ -252,3 +252,14 @@ Chance, on both populations. The remaining three terms, pincode cluster size, de
 
 **The part worth remembering.** We built the oracle so that a detector could not quietly grade its own homework, and then let the oracle be graded by the same defective world. A reference is only a reference if it is re-established when the thing it measures changes, and **the fix that repaired the detector silently invalidated the fixture, with no test looking at the relationship between them.** The detector's suspiciously good number was investigated within minutes. The oracle's suspiciously bad one sat in a committed artifact for a full day, because a fixture reading low looks like the world being hard rather than like a bug.
 
+---
+
+### 2026-08-30 — A patch script threw away four good edits and reported success
+
+- **What broke:** the README rendered with stale content. The opening still led on PR AUC rather than latency, and the ring row still read "see below" where the measured precision was 1.0000. The patch script that was supposed to have fixed all of it had printed `ok` four times.
+- **What we thought was wrong:** the artifact. The natural reading was that `results.json` had not picked up the new keys, or that `cite.py` was substituting from a stale copy. That would have been a real and serious problem, and it was about to be reported as one.
+- **What was actually wrong:** the script. It made four substitutions in memory, printed `ok` for each, then raised on a fifth whose anchor text had drifted, and its single `write()` was at the **end**. Nothing was ever saved. The four `ok` lines were true statements about a file that was then discarded.
+- **What pointed at it:** checking the template rather than the rendered output. `grep` for the new keys found the household counts, which had been applied by a separate script, and none of the four from the failed one. That located the failure in the writer, not the renderer.
+- **How we fixed it:** the rewritten script writes after **every** substitution and reports a missing anchor as a skip rather than an abort, so a later mismatch cannot undo earlier work.
+- **The part worth remembering, and this is the second time:** the syntax error shipped a few hours earlier was verified with an import that could not reach the file that had changed. This is the same shape. **The check ran, it printed success, and it was checking the wrong moment.** In both cases the verification was real and the thing it verified was not the thing that mattered. A check that cannot observe the failure it is meant to catch is worse than no check, because it converts an unverified change into one that looks verified.
+
