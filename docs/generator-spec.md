@@ -474,6 +474,12 @@ The principle: if attribute *A* collides only among attackers, then "shares *A*"
 | `email` domain | Gmail dominance means domain equality is nearly uninformative. | **~70%** of legitimate emails on the top-3 domains | **[assumption]** |
 | `email` local-part shape | Real people also use `firstname.lastname1994@`. Shape classes must overlap between populations. | No shape class may be **>85% pure** for either label | **[assumption]**, expressed as a purity ceiling rather than a rate |
 | `contact` | Genuine phone reuse: a shared family number used on two accounts, or a customer with two accounts. Rare but non-zero. | **1.5%** of legitimate accounts share a phone | **[assumption]** |
+| `vpa` handle | Millions legitimately share `@okhdfcbank`, `@kotak811` (the latter observed live in the probe downtime feed). | Handle collision **>40%** among legitimate UPI attempts, i.e. deliberately near-worthless | **[assumption]** |
+| `vpa` local part | Local parts are usually the phone number, so this is **not an independent attribute**: it is a function of `contact`. | **Derived, not chosen.** `contact_rate x 0.92^2 x 0.72`, which evaluates to **~1.03%** at the current configuration. See the derivation below. | **[derived]** |
+| `card.last4` | 10,000 possible values. Collisions are pure birthday-problem noise at any real volume. | Whatever falls out of uniform draw; **must not be suppressed** | derived |
+| `checkout_ms` | Returning customers with saved instruments and one-tap UPI are genuinely fast. The fast tail must not be exclusively fraud. | **≥30%** of legitimate attempts under 1000ms | **[assumption]**, raised from 12% by the §7 reconciliation |
+| `account_age_days` | Real new customers exist, and attackers use aged stolen accounts. | **≥10%** of legitimate attempts from accounts under 7 days old, and **≥20%** of attack attempts from accounts over 90 days old | **[assumption]** |
+| `ip_prefix` | CGNAT means unrelated mobile users routinely share a /24. | Would need to be very high, and **we have no source for it** | **[no source]** — see §6 |
 
 > **Assigned rate against observed rate, added 2026-08-30.** The two account-level rows above, `device_id` at 6% and `contact` at 1.5%, are **targets for the OBSERVED rate in the generated stream**. The constants that produce them are deliberately higher, and anyone comparing the spec to `config.py` will otherwise read a mismatch:
 >
@@ -487,12 +493,6 @@ The principle: if attribute *A* collides only among attackers, then "shares *A*"
 > **These are calibration constants, not modelling claims.** The claim is the observed 6% and 1.5%; the constants are whatever produces them at this actor count and window length. T3 checks the observed value, which is the number that matters, and it is the observed value that must stay inside ±20%.
 >
 > **This moves with scale.** The 62% observability figure is a property of `ACTOR_CLASSES` rates against a 30-day window. Change the window length, the actor count or the purchase rates and the correction changes with them, so both constants must be **re-derived rather than carried forward**. Treat 0.072 and 0.025 the way §4 already tells you to treat the `vpa` target: the current evaluation of a correction, never a constant in their own right.
-| `vpa` handle | Millions legitimately share `@okhdfcbank`, `@kotak811` (the latter observed live in the probe downtime feed). | Handle collision **>40%** among legitimate UPI attempts, i.e. deliberately near-worthless | **[assumption]** |
-| `vpa` local part | Local parts are usually the phone number, so this is **not an independent attribute**: it is a function of `contact`. | **Derived, not chosen.** `contact_rate x 0.92^2 x 0.72`, which evaluates to **~1.03%** at the current configuration. See the derivation below. | **[derived]** |
-| `card.last4` | 10,000 possible values. Collisions are pure birthday-problem noise at any real volume. | Whatever falls out of uniform draw; **must not be suppressed** | derived |
-| `checkout_ms` | Returning customers with saved instruments and one-tap UPI are genuinely fast. The fast tail must not be exclusively fraud. | **≥30%** of legitimate attempts under 1000ms | **[assumption]**, raised from 12% by the §7 reconciliation |
-| `account_age_days` | Real new customers exist, and attackers use aged stolen accounts. | **≥10%** of legitimate attempts from accounts under 7 days old, and **≥20%** of attack attempts from accounts over 90 days old | **[assumption]** |
-| `ip_prefix` | CGNAT means unrelated mobile users routinely share a /24. | Would need to be very high, and **we have no source for it** | **[no source]** — see §6 |
 
 > **Corrected 2026-08-28.** This row previously also asked for a 2-4% pair-collision rate. **That is arithmetically incompatible with top-50 carrying 25%.** Pair collision is `sum(p_i^2)`, so a 2-4% rate implies an effective population of only 25-50 pincodes, i.e. essentially every order arriving from about 33 postcodes. India has ~19,000 and the shape above gives 681 effective pincodes at 0.147%. Only one of the two numbers can be true, and the concentration curve is the one grounded in a real mechanism, so the collision rate is now derived from it rather than asserted alongside it.
 >
@@ -700,6 +700,7 @@ An oracle that looked up labels would trivially score 1.0 and measure nothing. T
 | Event-level ROC-AUC, all attack types | **>= 0.85** | Below this the joint pattern is too weak to be worth detecting. |
 | Card-testing burst recall @ precision 0.80 | **>= 0.90** | Card testing is a strong, high-volume pattern. An oracle that cannot find 9 in 10 burst events has been denied the structure. |
 | Ring member recall @ precision 0.70, **scored at the account level** | **>= 0.60** | Rings are genuinely harder, low-rate and interleaved. A lower floor is honest, not a concession. |
+| Oracle vs impoverished window model (T6) | **gap >= 0.10 AUC** | See section 7.3. If the full-feature oracle cannot beat the volume-and-decline-only model by a clear margin, the linking attributes carry no signal and the coordination premise is unsupported. |
 
 > **This leg is UNBOUNDED, not failed. Corrected 2026-08-30, and the correction matters more than the number.**
 >
@@ -722,7 +723,6 @@ An oracle that looked up labels would trivially score 1.0 and measure nothing. T
 > Card testing stays at event level, and not merely by convention: 90% of its rows are guest checkout with a null `account_id`, so there is no account to aggregate to. The event is the unit of action.
 >
 > **The oracle's ring rule was also stale.** It fired only when a pincode cluster exceeded the 99.5th percentile, which is 112 accounts. After drop pincodes were drawn unweighted the clusters are 7, 11 and 8, so the rule never fired and event-level ring PR AUC fell to 0.0034. The rule now scores a cluster against how populous that pincode normally is, rather than against a global percentile, and adds the conjunction of shared pincode with shared device, which the account-level diagnostic identified as the only feature separating a ring member from its innocent neighbours.
-| Oracle vs impoverished window model (T6) | **gap >= 0.10 AUC** | See section 7.3. If the full-feature oracle cannot beat the volume-and-decline-only model by a clear margin, the linking attributes carry no signal and the coordination premise is unsupported. |
 
 #### What we do when T8 fails
 

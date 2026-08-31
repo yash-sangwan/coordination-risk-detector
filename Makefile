@@ -1,5 +1,5 @@
 # One entry point. Every number in the project comes from `make evaluate`.
-.PHONY: evaluate verify reuse memory-profile from-logs check-docs render-docs clean-results
+.PHONY: evaluate verify reuse memory-profile from-logs check-docs render-docs check-markdown clean-results
 
 evaluate:
 	python -m pipeline.evaluate
@@ -37,6 +37,11 @@ check-docs:
 
 render-docs:
 	python -m pipeline.cite --render-all
+
+# Render every published markdown file and fail if a table came out as
+# literal text, which is what a block wedged into a table looks like.
+check-markdown:
+	python -m pipeline.mdcheck
 
 clean-results:
 	rm -rf results
