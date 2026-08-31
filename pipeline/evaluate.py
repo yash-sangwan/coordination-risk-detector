@@ -107,6 +107,7 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(RESULTS, exist_ok=True)
+    check_generated_docs()
     t_start = time.time()
     timings = {}
     results = {"schema": 1}
@@ -193,6 +194,12 @@ def main():
     from pipeline.report import write_summary, write_chart
     write_summary(results, meta, os.path.join(RESULTS, "summary.md"))
     write_chart(results, os.path.join(RESULTS, "pr_auc_vs_decline.png"))
+
+    # The artifact has just changed, so every generated document is stale
+    # by definition. Re-render rather than report it.
+    from pipeline.cite import render_all
+    for _out in render_all(results):
+        print(f"  re-rendered {_out}")
 
     print("\n" + "=" * 78)
     print(f"TOTAL WALL TIME {total/60:.1f} min")
@@ -359,6 +366,36 @@ def _split_perf(results):
         if section in results and key in results[section]:
             perf[f"{section}.{key}"] = results[section].pop(key)
     return perf
+
+
+def check_generated_docs():
+    """Warn, before doing any work, if a generated document was edited by hand.
+
+    Run at the START deliberately. At this point results.json is still whatever
+    it was when those documents were last rendered, so a mismatch means the file
+    was edited directly, or an earlier run changed the artifact and nobody
+    re-rendered. Either way the difference is about to be overwritten, so it is
+    worth saying so before spending an hour producing the thing that overwrites
+    it.
+
+    Loud, not fatal. This is about documents, not numbers, and aborting a long
+    run over a stale README would be the wrong trade. `python -m pipeline.cite
+    --check` exits non-zero for anything that wants a hard gate.
+    """
+    try:
+        from pipeline.cite import check, GENERATED
+        bad = check()
+    except SystemExit:
+        return          # no artifact yet, which is a normal first run
+    if not bad:
+        return
+    print("!" * 78)
+    print("GENERATED DOCUMENTS DO NOT MATCH THEIR TEMPLATES")
+    for out, tmpl, line in bad:
+        print(f"  {out} differs from a render of {tmpl}, first at line {line}")
+    print("Whatever differs will be overwritten when this run re-renders them")
+    print("at the end. If it was a hand edit, move it into the template now.")
+    print("!" * 78, flush=True)
 
 
 def _git(args):

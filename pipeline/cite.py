@@ -11,6 +11,7 @@ is enforced by the renderer failing, not by anyone remembering it.
 """
 
 import argparse
+import io
 import json
 import os
 import re
@@ -18,6 +19,13 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS = os.path.join(ROOT, "results", "results.json")
+
+# Every generated document, as (template, output). Adding a pair here is all it
+# takes for --render-all and --check to cover it.
+GENERATED = (
+    ("README.template.md", "README.md"),
+    ("docs/architecture.template.md", "docs/architecture.md"),
+)
 
 _KEY = re.compile(r'"([^"]+)"|([^.\[\]"]+)')
 
@@ -87,13 +95,75 @@ def render(text, data=None):
     return out
 
 
+def render_all(data=None):
+    """Re-render every registered pair. Returns the paths written."""
+    data = load() if data is None else data
+    written = []
+    for tmpl, out in GENERATED:
+        text = render(io.open(os.path.join(ROOT, tmpl), encoding="utf-8").read(), data)
+        io.open(os.path.join(ROOT, out), "w", encoding="utf-8",
+                newline="\n").write(text)
+        written.append(out)
+    return written
+
+
+def check(data=None):
+    """Which generated files no longer match what their template produces.
+
+    Returns [(output, template, first differing line number)]. It cannot tell a
+    hand edit apart from a file left stale by a newer artifact: both show up as
+    a difference, and both are fixed the same way, by re-rendering. What it does
+    guarantee is that neither goes unnoticed.
+    """
+    data = load() if data is None else data
+    bad = []
+    for tmpl, out in GENERATED:
+        expected = render(io.open(os.path.join(ROOT, tmpl), encoding="utf-8").read(),
+                          data)
+        path = os.path.join(ROOT, out)
+        actual = io.open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+        if actual == expected:
+            continue
+        a, b = actual.split("\n"), expected.split("\n")
+        line = next((i + 1 for i in range(max(len(a), len(b)))
+                     if (a[i] if i < len(a) else None)
+                     != (b[i] if i < len(b) else None)), 1)
+        bad.append((out, tmpl, line))
+    return bad
+
+
 def main():
     ap = argparse.ArgumentParser(description="Cite a number from results.json")
     ap.add_argument("key", nargs="?")
     ap.add_argument("--list", action="store_true", help="every available key")
     ap.add_argument("--render", metavar="FILE", help="substitute {{key}} in FILE")
+    ap.add_argument("--render-all", action="store_true",
+                    help="re-render every generated document in place")
+    ap.add_argument("--check", action="store_true",
+                    help="fail if any generated document no longer matches its "
+                         "template")
     args = ap.parse_args()
     data = load()
+    if args.render_all:
+        for out in render_all(data):
+            print("rendered", out)
+        return 0
+    if args.check:
+        bad = check(data)
+        if not bad:
+            print("all %d generated documents match their templates"
+                  % len(GENERATED))
+            return 0
+        print("GENERATED FILES DO NOT MATCH THEIR TEMPLATES")
+        for out, tmpl, line in bad:
+            print("  %s differs from a render of %s, first at line %d"
+                  % (out, tmpl, line))
+        print("")
+        print("Either the file was edited by hand, which the next render would")
+        print("discard, or the artifact changed and it was never re-rendered.")
+        print("Both are fixed the same way:")
+        print("  python -m pipeline.cite --render-all")
+        return 1
     if args.list:
         for k, v in sorted(flatten(data).items()):
             print(f"{k} = {v}")

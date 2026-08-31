@@ -1,5 +1,5 @@
 # One entry point. Every number in the project comes from `make evaluate`.
-.PHONY: evaluate verify reuse memory-profile from-logs clean-results
+.PHONY: evaluate verify reuse memory-profile from-logs check-docs render-docs clean-results
 
 evaluate:
 	python -m pipeline.evaluate
@@ -28,6 +28,15 @@ memory-profile:
 # without re-running any stage.
 from-logs:
 	python -m pipeline.evaluate --from-logs
+
+# Fail if a generated document no longer matches its template, which means it
+# was edited by hand or an earlier run left it stale. Either way the next render
+# discards the difference.
+check-docs:
+	python -m pipeline.cite --check
+
+render-docs:
+	python -m pipeline.cite --render-all
 
 clean-results:
 	rm -rf results
